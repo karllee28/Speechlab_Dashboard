@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Group Communication Control Dashboard</title>
+    <script src="https://cdn.tailwindcss.com">
+    </script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js">
+    </script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js">
+    </script>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script src="/mediasoup-client.bundle.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js">
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        * {
+            font-family: 'Inter', sans-serif;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        html,
+        body,
+        #root {
+            width: 100%;
+            min-height: 100%;
+            height: 100%;
+        }
+        body {
+            margin: 0;
+            background: #e8e9eb;
+            overflow: hidden;
+        }
+        .dashboard-container {
+            width: 100vw;
+            max-width: none;
+            height: 100vh;
+            min-height: 0;
+            background: #e8e9eb;
+            border-radius: 0;
+            padding: 18px 24px 18px 24px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            border: 0;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        /* Custom scroll */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #d0d1d4;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        /* Button base */
+        .ctrl-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px 16px;
+            border-radius: 30px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            border: 2px solid #3a3a3a;
+            background: #f0f1f3;
+            color: #1a1a1a;
+            cursor: pointer;
+            transition: all 0.08s ease;
+            box-shadow: 0 2px 0 #3a3a3a;
+            min-height: 34px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .ctrl-btn:active {
+            transform: translateY(2px);
+            box-shadow: 0 0px 0 #3a3a3a;
+        }
+        .ctrl-btn:hover:not(:disabled) {
+            background: #e4e6ea;
+        }
+        .ctrl-btn:disabled {
+            opacity: 0.5;
+            transform: translateY(0);
+            box-shadow: 0 2px 0 #3a3a3a;
+            cursor: not-allowed;
+        }
+        .ctrl-btn.active {
+            background: #4a8af4;
+            color: #fff;
+            border-color: #1a3a7a;
+            box-shadow: 0 2px 0 #1a3a7a;
+        }
+        .ctrl-btn.danger {
+            background: #dd3333;
+            color: #fff;
+            border-color: #811;
+            box-shadow: 0 2px 0 #811;
+        }
+        .ctrl-btn.danger:hover:not(:disabled) {
+            background: #c22;
+        }
+        .ctrl-btn.success {
+            background: #2a8a4a;
+            color: #fff;
+            border-color: #1a5a2a;
+            box-shadow: 0 2px 0 #1a5a2a;
+        }
+        .ctrl-btn.success:hover:not(:disabled) {
+            background: #1f7a3a;
+        }
+        .ctrl-btn.warning {
+            background: #e8a020;
+            color: #fff;
+            border-color: #a07010;
+            box-shadow: 0 2px 0 #a07010;
+        }
+        .ctrl-btn.small {
+            padding: 4px 12px;
+            font-size: 10px;
+            min-height: 28px;
+        }
+        .ctrl-btn.large {
+            padding: 10px 28px;
+            font-size: 16px;
+            min-height: 48px;
+            border-radius: 40px;
+        }
+        /* Toggle switch */
+        .toggle-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #1a1a1a;
+            text-transform: uppercase;
+        }
+        .toggle-track {
+            width: 42px;
+            height: 24px;
+            background: #b0b2b8;
+            border-radius: 30px;
+            border: 2px solid #3a3a3a;
+            cursor: pointer;
+            position: relative;
+            transition: background 0.15s;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
+            flex-shrink: 0;
+        }
+        .toggle-track.active {
+            background: #4a8af4;
+            border-color: #1a3a7a;
+        }
+        .toggle-knob {
+            width: 18px;
+            height: 18px;
+            background: #f0f1f3;
+            border-radius: 50%;
+            position: absolute;
+            top: 1px;
+            left: 1px;
+            transition: left 0.15s;
+            border: 1px solid #3a3a3a;
+        }
+        .toggle-track.active .toggle-knob {
+            left: 19px;
+            border-color: #1a3a7a;
+        }
+        /* Participant button */
+        .part-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px 8px 14px;
+            border-radius: 16px;
+            background: #c8dae8;
+            border: 2px solid #3a3a3a;
+            box-shadow: 0 3px 0 #3a3a3a;
+            min-height: 58px;
+            cursor: pointer;
+            transition: all 0.08s ease;
+            position: relative;
+            font-weight: 500;
+            font-size: 12px;
+            color: #1a1a2a;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .part-btn:active {
+            transform: translateY(3px);
+            box-shadow: 0 0px 0 #3a3a3a;
+        }
+        .part-btn:hover:not(.disabled) {
+            background: #b8cada;
+        }
+        .part-btn .label {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+        }
+        .voice-wave {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            flex-shrink: 0;
+            width: 42px;
+            height: 28px;
+            padding: 2px 4px;
+            border: 1px solid #3a3a3a;
+            border-radius: 5px;
+            background: #9a9ca2;
+        }
+        .voice-wave-bar {
+            width: 3px;
+            min-height: 3px;
+            border-radius: 3px;
+            background: #2a8a4a;
+            transition: height 0.12s ease, background 0.12s ease;
+        }
+        .part-btn .status-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid #3a3a3a;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        .part-btn .status-dot.green {
+            background: #2a8a4a;
+        }
+        .part-btn .status-dot.yellow {
+            background: #e8a020;
+        }
+        .part-btn .status-dot.red {
+            background: #dd3333;
+        }
+        .part-btn .status-dot.blue {
+            background: #4a8af4;
+        }
+        .part-btn .status-dot.gray {
+            background: #8a8a8a;
+        }
+        .part-btn .hand-icon {
+            font-size: 16px;
+            flex-shrink: 0;
+            color: #d33;
+            margin-right: 2px;
+            animation: pulse-hand 1s ease-in-out infinite;
+        }
+        @keyframes pulse-hand {
+            0%,
+            100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.2);
+            }
+        }
+        .part-btn.selected {
+            border-color: #4a8af4;
+            box-shadow: 0 3px 0 #1a3a7a, 0 0 0 2px rgba(74, 138, 244, 0.3);
+            background: #b0c8e8;
+        }
+        .part-btn .group-badge {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid #3a3a3a;
+            font-size: 8px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            background: #4a8af4;
+        }
+        .part-btn.disabled {
+            background: #dd3333;
+            border-color: #811;
+            box-shadow: 0 3px 0 #811;
+            color: #fff;
+            opacity: 0.9;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        .part-btn.disabled:hover {
+            background: #d33;
+        }
+        .part-btn.raised {
+            border-color: #dd3333;
+            box-shadow: 0 3px 0 #811, 0 0 0 2px rgba(221, 51, 51, 0.25);
+        }
+        /* Bottom panel */
+        .bottom-panel {
+            display: flex;
+            align-items: stretch;
+            gap: 12px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+        .ptt-control {
+            flex: 1 1 330px !important;
+            min-width: 280px !important;
+        }
+        .ptt-control .ctrl-btn {
+            min-width: 150px;
+        }
+        .display-panel {
+            background: #d0d2d8;
+            border: 2px solid #3a3a3a;
+            border-radius: 16px;
+            padding: 6px 16px;
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+        .display-panel .label {
+            font-size: 9px;
+            font-weight: 700;
+            color: #4a4a5a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .display-panel .content {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1a1a2a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        /* Volume slider */
+        .vol-wrap {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            background: #d0d2d8;
+            border: 2px solid #3a3a3a;
+            border-radius: 16px;
+            padding: 8px 12px;
+            min-width: 190px;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .vol-wrap .vol-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: #4a4a5a;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+        .vol-wrap .vol-icon {
+            font-size: 15px;
+            line-height: 1;
+        }
+        .vol-wrap input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            min-width: 70px;
+            height: 8px;
+            background: #b0b2b8;
+            border-radius: 8px;
+            outline: none;
+            border: 1px solid #3a3a3a;
+            cursor: pointer;
+            accent-color: #4a8af4;
+        }
+        .vol-wrap input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4a8af4;
+            border: 3px solid #f0f1f3;
+            box-shadow: 0 0 0 2px #1a3a7a;
+            cursor: pointer;
+        }
+        .vol-wrap .vol-pct {
+            min-width: 38px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #1a1a2a;
+            text-align: right;
+        }
+        /* Group indicators */
+        .group-indicators {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .group-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 2px solid #3a3a3a;
+            cursor: pointer;
+            transition: all 0.1s;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        }
+        .group-dot:hover {
+            transform: scale(1.05);
+        }
+        .group-dot.active {
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.6), 0 0 0 5px #3a3a3a;
+        }
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+        .modal-box {
+            background: #e8e9eb;
+            border: 3px solid #3a3a3a;
+            border-radius: 24px;
+            padding: 28px 32px;
+            max-width: 700px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+        }
+        .modal-box h2 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 16px;
+            color: #1a1a2a;
+            border-bottom: 2px solid #3a3a3a;
+            padding-bottom: 12px;
+        }
+        .modal-close {
+            float: right;
+            background: none;
+            border: none;
+            font-size: 28px;
+            cursor: pointer;
+            color: #3a3a3a;
+            line-height: 1;
+            padding: 0 4px;
+        }
+        .modal-close:hover {
+            color: #d33;
+        }
+        /* Side menu */
+        .side-menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 300px;
+            background: #e8e9eb;
+            border-right: 3px solid #3a3a3a;
+            z-index: 2000;
+            padding: 24px 20px;
+            transform: translateX(-100%);
+            transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1);
+            box-shadow: 6px 0 30px rgba(0, 0, 0, 0.3);
+            overflow-y: auto;
+        }
+        .side-menu.open {
+            transform: translateX(0);
+        }
+        .side-menu .menu-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 15px;
+            color: #1a1a2a;
+            cursor: pointer;
+            transition: background 0.1s;
+            border: 2px solid transparent;
+            margin-bottom: 4px;
+        }
+        .side-menu .menu-item:hover {
+            background: #d0d2d8;
+            border-color: #3a3a3a;
+        }
+        .side-menu .menu-item .icon {
+            font-size: 20px;
+            width: 32px;
+            text-align: center;
+        }
+        .side-menu .close-btn {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            font-size: 28px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #3a3a3a;
+            padding: 0 6px;
+        }
+        /* Settings panel */
+        .settings-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .settings-row label {
+            font-weight: 600;
+            font-size: 13px;
+            min-width: 120px;
+            color: #1a1a2a;
+        }
+        .settings-row input,
+        .settings-row select {
+            padding: 6px 12px;
+            border-radius: 10px;
+            border: 2px solid #3a3a3a;
+            background: #f0f1f3;
+            font-weight: 500;
+            font-size: 13px;
+            flex: 1;
+            min-width: 120px;
+        }
+        .settings-row .color-pick {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            border: 2px solid #3a3a3a;
+            padding: 2px;
+            cursor: pointer;
+        }
+        .settings-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        /* Misc */
+        .flex-center {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .gap-4 {
+            gap: 4px;
+        }
+        .gap-8 {
+            gap: 8px;
+        }
+        .gap-12 {
+            gap: 12px;
+        }
+        .text-xxs {
+            font-size: 9px;
+        }
+        .border-dark {
+            border-color: #3a3a3a;
+        }
+        .bg-panel {
+            background: #d0d2d8;
+        }
+        .rounded-2xl {
+            border-radius: 16px;
+        }
+        .shadow-inner-dark {
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+        /* Grid */
+        .participant-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            flex: 1;
+            align-content: start;
+            padding: 4px 0;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        @media (max-width: 900px) {
+            .participant-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        @media (max-width: 640px) {
+            .participant-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .dashboard-container {
+                width: 100vw;
+                max-width: none;
+                height: 100vh;
+                padding: 12px;
+                border-radius: 0;
+            }
+            .bottom-panel {
+                flex-wrap: wrap;
+            }
+            .ptt-control {
+                flex-basis: 100%;
+                min-width: 100% !important;
+            }
+            .vol-wrap input[type="range"] {
+                min-width: 60px;
+            }
+        }
+        /* gear icon */
+        .gear-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #3a3a3a;
+            padding: 0 4px;
+            transition: transform 0.2s;
+            line-height: 1;
+        }
+        .gear-btn:hover {
+            transform: rotate(60deg);
+            color: #1a1a2a;
+        }
+        /* hamburger */
+        .hamburger {
+            font-size: 28px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            color: #3a3a3a;
+            padding: 0 4px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+        }
+        .hamburger:hover {
+            color: #1a1a2a;
+        }
+        /* group mode highlight */
+        .group-mode-active .part-btn {
+            border-style: dashed;
+            border-color: #4a8af4;
+        }
+        .group-mode-active .part-btn.selected {
+            border-style: solid;
+        }
+        /* toast */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a2a;
+            color: #fff;
+            padding: 12px 28px;
+            border-radius: 30px;
+            font-weight: 600;
+            font-size: 14px;
+            border: 2px solid #4a8af4;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+            z-index: 9999;
+            animation: toastIn 0.2s ease;
+        }
+        @keyframes toastIn {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+        .ptt-active {
+            animation: pttPulse 0.6s ease-in-out infinite alternate;
+        }
+        @keyframes pttPulse {
+            from {
+                box-shadow: 0 0 0 0 rgba(74, 138, 244, 0.4);
+            }
+            to {
+                box-shadow: 0 0 0 12px rgba(74, 138, 244, 0);
+            }
+        }
+        .group-label-small {
+            font-size: 10px;
+            font-weight: 700;
+            color: #4a4a5a;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .teacher-level {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border: 2px solid #3a3a3a;
+            border-radius: 10px;
+            background: #d0d2d8;
+            font-size: 9px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .teacher-level .voice-wave {
+            width: 76px;
+            height: 30px;
+            gap: 3px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } = React;
+
+        // ----- DATA -----
+        const COLORS = ['#2a8a4a', '#4a8af4', '#dd3333', '#e8a020'];
+        const GROUP_COLORS = ['#2a8a4a', '#4a8af4', '#dd3333', '#e8a020'];
+        const GROUP_NAMES = ['Alpha', 'Beta', 'Gamma', 'Delta'];
+
+        const initialParticipants = () => {
+            const names = [
+                'Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Henry',
+                'Ivy', 'Jack', 'Karen', 'Leo', 'Mia', 'Noah', 'Olivia', 'Paul',
+                'Quinn', 'Rose', 'Sam', 'Tina'
+            ];
+            return names.map((name, i) => ({
+                id: `p${i + 1}`,
+                name,
+                connected: i < 16,
+                muted: i % 5 === 0,
+                raisedHand: i === 2 || i === 7,
+                selected: false,
+                groupId: null,
+                status: i < 14 ? 'active' : (i < 17 ? 'yellow' : (i < 19 ? 'red' : 'gray')),
+            }));
+        };
+
+        // ----- CONTEXT -----
+        const AppContext = React.createContext();
+
+        // ----- TOAST -----
+        const Toast = ({ message, onClose }) => {
+            useEffect(() => {
+                const t = setTimeout(onClose, 2500);
+                return () => clearTimeout(t);
+            }, [onClose]);
+            return <div className="toast">{message}</div>;
+        };
+
+        // ----- MODAL -----
+        const Modal = ({ title, children, onClose }) => {
+            return (
+                <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+                    <div className="modal-box">
+                        <button className="modal-close" onClick={onClose}>×</button>
+                        <h2>{title}</h2>
+                        {children}
+                    </div>
+                </div>
+            );
+        };
+
+        // ----- SETTINGS PANEL -----
+        const SettingsPanel = ({ onClose }) => {
+            const { state, dispatch } = useContext(AppContext);
+            const [pNames, setPNames] = useState({});
+            const [gColors, setGColors] = useState({});
+            const [serverHost, setServerHost] = useState(state.serverInfo.host);
+            const [serverPort, setServerPort] = useState(String(state.serverInfo.port || '3000'));
+
+            useEffect(() => {
+                const pMap = {};
+                state.participants.forEach(p => { pMap[p.id] = p.name; });
+                setPNames(pMap);
+                const gMap = {};
+                state.groups.forEach(g => { gMap[g.id] = g.color; });
+                setGColors(gMap);
+            }, [state.participants, state.groups]);
+
+            const updateName = (id, val) => {
+                const newNames = { ...pNames, [id]: val };
+                setPNames(newNames);
+                dispatch({ type: 'RENAME_PARTICIPANT', payload: { id, name: val } });
+            };
+
+            const updateGroupColor = (id, val) => {
+                const newColors = { ...gColors, [id]: val };
+                setGColors(newColors);
+                dispatch({ type: 'UPDATE_GROUP_COLOR', payload: { id, color: val } });
+            };
+
+            const resetDashboard = () => {
+                if (confirm('Reset all dashboard state?')) {
+                    dispatch({ type: 'RESET' });
+                    onClose();
+                }
+            };
+
+            const saveServerSettings = () => {
+                const host = serverHost.trim();
+                const port = Number(serverPort);
+                if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+                    alert('Enter a valid server host and port.');
+                    return;
+                }
+                const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+                localStorage.setItem('speechlab-server-url', `${protocol}//${host}:${port}`);
+                window.location.href = `${protocol}//${host}:${port}`;
+            };
+
+            const requestMicrophone = state.requestMicrophone;
+
+            return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div className="settings-row">
+                        <label>Participant Names</label>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {state.participants.slice(0, 10).map(p => (
+                                <div key={p.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    <span style={{ fontSize: 11, fontWeight: 600, minWidth: 30 }}>{p.id}</span>
+                                    <input value={pNames[p.id] || ''} onChange={e => updateName(p.id, e.target.value)}
+                                    style={{ flex: 1 }} />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="settings-row">
+                        <label>Group Colors</label>
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                            {state.groups.map(g => (
+                                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 600 }}>{g.name}</span>
+                                    <input type="color" value={gColors[g.id] || '#4a8af4'}
+                                    onChange={e => updateGroupColor(g.id, e.target.value)}
+                                    className="color-pick" />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="settings-row">
+                        <label>Audio Input</label>
+                        <select value={state.inputDeviceId} onChange={e => dispatch({ type: 'SET_INPUT_DEVICE', payload: e.target.value })}>
+                            <option value="">Default microphone</option>
+                            {state.audioDevices.filter(device => device.kind === 'audioinput').map(device => (
+                                <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${device.deviceId.slice(0, 6)}`}</option>
+                            ))}
+                        </select>
+                        <button className="ctrl-btn small" onClick={requestMicrophone}>ENABLE MIC</button>
+                    </div>
+                    <div className="settings-row">
+                        <label>Audio Output</label>
+                        <select value={state.outputDeviceId} onChange={e => dispatch({ type: 'SET_OUTPUT_DEVICE', payload: e.target.value })}>
+                            <option value="">Default speaker</option>
+                            {state.audioDevices.filter(device => device.kind === 'audiooutput').map(device => (
+                                <option key={device.deviceId} value={device.deviceId}>{device.label || `Speaker ${device.deviceId.slice(0, 6)}`}</option>
+                            ))}
+                        </select>
+                        <span style={{ fontSize: 10, color: '#4a4a5a' }}>{state.outputSupported ? 'READY' : 'BROWSER LIMIT'}</span>
+                    </div>
+                    {state.audioError && <div style={{ color: '#811', fontSize: 11, fontWeight: 600 }}>{state.audioError}</div>}
+                    <div className="settings-row">
+                        <label>Microphone Volume</label>
+                        <input type="range" min="0" max="100" defaultValue="80" style={{ flex: 1 }} />
+                    </div>
+                    <div className="settings-row">
+                        <label>Speaker Volume</label>
+                        <input type="range" min="0" max="100" defaultValue="70" style={{ flex: 1 }} />
+                    </div>
+                    <div className="settings-row">
+                        <label>Push-to-Talk</label>
+                        <select><option>Hold to Talk</option><option>Toggle</option></select>
+                    </div>
+                    <div className="settings-row">
+                        <label>Raised Hand</label>
+                        <select><option>Auto-clear after 30s</option><option>Manual clear</option></select>
+                    </div>
+                    <div className="settings-row">
+                        <label>Server</label>
+                        <input value={serverHost} onChange={e => setServerHost(e.target.value)} placeholder="Server IP or hostname" style={{ flex: 1, minWidth: 150 }} />
+                        <input value={serverPort} onChange={e => setServerPort(e.target.value)} inputMode="numeric" aria-label="Server port" style={{ flex: '0 1 90px', minWidth: 90 }} />
+                        <button className="ctrl-btn small" onClick={saveServerSettings}>SAVE</button>
+                    </div>
+                    <div style={{ marginTop: -4, color: '#4a4a5a', fontSize: 11, fontWeight: 600 }}>
+                        ESP32 SERVER_HOST: {serverHost} | SERVER_PORT: {serverPort}
+                    </div>
+                    <div className="settings-actions">
+                        <button className="ctrl-btn danger" onClick={resetDashboard}>Reset Dashboard</button>
+                        <button className="ctrl-btn" onClick={onClose}>Close</button>
+                    </div>
+                </div>
+            );
+        };
+
+        // ----- MULTIMEDIA PANEL -----
+        const MultimediaPanel = ({ onClose }) => {
+            const { dispatch } = useContext(AppContext);
+            const [content, setContent] = useState('No content selected');
+
+            const showContent = (label) => {
+                setContent(label);
+                dispatch({ type: 'SET_DISPLAY', payload: label });
+            };
+
+            return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        {['Video', 'Images', 'Audio', 'TV/Display', 'Presentations'].map(item => (
+                            <button key={item} className="ctrl-btn" onClick={() => showContent(item)}
+                            style={{ justifyContent: 'center' }}>
+                            {item}
+                        </button>
+                    ))}
+                </div>
+                <div style={{ background: '#d0d2d8', padding: 16, borderRadius: 16, border: '2px solid #3a3a3a', textAlign: 'center' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#4a4a5a' }}>NOW SHOWING</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a2a', marginTop: 4 }}>{content}</div>
+                </div>
+                <button className="ctrl-btn" onClick={onClose} style={{ alignSelf: 'center' }}>Close</button>
+            </div>
+        );
+    };
+
+    // ----- GAMES & QUIZ PANEL -----
+    const GamesQuizPanel = ({ onClose }) => {
+        const { dispatch } = useContext(AppContext);
+        const [active, setActive] = useState('None');
+
+        const launch = (name) => {
+            setActive(name);
+            dispatch({ type: 'SET_DISPLAY', payload: `🎮 ${name}` });
+        };
+
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    {['Trivia Quiz', 'Word Puzzle', 'Escape Room', 'Jeopardy', 'Memory Game', 'Bingo'].map(item => (
+                        <button key={item} className="ctrl-btn" onClick={() => launch(item)}
+                        style={{ justifyContent: 'center' }}>
+                        {item}
+                    </button>
+                ))}
+            </div>
+            <div style={{ background: '#d0d2d8', padding: 16, borderRadius: 16, border: '2px solid #3a3a3a', textAlign: 'center' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#4a4a5a' }}>ACTIVE GAME / QUIZ</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a2a', marginTop: 4 }}>{active}</div>
+            </div>
+            <button className="ctrl-btn" onClick={onClose} style={{ alignSelf: 'center' }}>Close</button>
+        </div>
+    );
+};
+
+const VoiceWave = ({ level, label, compact = false }) => {
+    const normalizedLevel = Number.isFinite(level) ? Math.max(0, Math.min(100, level)) : null;
+    const waveShape = [0.35, 0.58, 0.82, 1, 0.72, 0.92, 0.62, 0.42];
+    const color = normalizedLevel === null ? '#6f7177' : (normalizedLevel > 85 ? '#dd3333' : '#2a8a4a');
+
+    return (
+        <span className={`voice-wave ${compact ? 'compact' : ''}`} aria-label={label} title={label}>
+            {waveShape.map((shape, index) => (
+                <span
+                    key={index}
+                    className="voice-wave-bar"
+                    style={{ height: `${normalizedLevel === null ? 3 : Math.max(3, normalizedLevel * shape * 0.24)}px`, background: color }}
+                ></span>
+            ))}
+        </span>
+    );
+};
+
+// ----- PARTICIPANT BUTTON -----
+const ParticipantButton = ({ participant, onSelect, onMute, onClearHand, groupColor, groupMode }) => {
+    const statusColor = {
+        active: 'green',
+        warning: 'yellow',
+        error: 'red',
+        selected: 'blue',
+        inactive: 'gray',
+    } [participant.status] || 'gray';
+
+    const isRaised = participant.raisedHand;
+    const micLevel = Number.isFinite(participant.micLevel) ? Math.max(0, Math.min(100, participant.micLevel)) : null;
+
+    const handleClick = () => {
+        if (groupMode) {
+            onSelect(participant.id);
+        } else {
+            // toggle mute on double-click or single? let's use right-click for mute, left for select
+            // we'll use left click for selection in group mode only
+        }
+    };
+
+    const handleRightClick = (e) => {
+        e.preventDefault();
+        onMute(participant.id);
+    };
+
+    return (
+        <div
+        className={`part-btn ${participant.selected ? 'selected' : ''} ${isRaised ? 'raised' : ''} ${!participant.connected ? 'disabled' : ''}`}
+        onClick={handleClick}
+        onContextMenu={handleRightClick}
+        title={`${participant.name} (${participant.id}) - ${participant.connected ? 'Connected' : 'Offline'} ${participant.muted ? '🔇' : ''}`}
+        >
+        {isRaised && <span className="hand-icon">✋</span>}
+        <span className="label">{participant.name}</span>
+        {participant.answer && <span style={{ fontSize: 10, fontWeight: 800, color: '#1a3a7a' }}>ANS {participant.answer}</span>}
+        {participant.audioActive && <span style={{ fontSize: 11 }} title="Audio active">🎙</span>}
+        <VoiceWave level={micLevel} compact label={micLevel === null ? 'Microphone level unavailable' : `Microphone level: ${micLevel}`} />
+        {participant.muted && <span style={{ fontSize: 12, flexShrink: 0 }}>🔇</span>}
+        {participant.groupId && groupColor && (
+            <span className="group-badge" style={{ background: groupColor }}>●</span>
+        )}
+        <span className={`status-dot ${statusColor}`}></span>
+        {isRaised && (
+            <button
+            style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', padding: '0 2px', color: '#dd3333', fontWeight: 700 }}
+            onClick={(e) => { e.stopPropagation();
+                onClearHand(participant.id); }}
+            title="Clear hand"
+            >✕</button>
+        )}
+    </div>
+);
+};
+
+// ----- MAIN APP -----
+const App = () => {
+    // ---- STATE ----
+    const [participants, setParticipants] = useState(initialParticipants);
+    const [serverOnline, setServerOnline] = useState(false);
+    const [groups, setGroups] = useState([
+        { id: 'g1', name: 'Alpha', color: '#2a8a4a', participants: [], active: false, muted: false },
+        { id: 'g2', name: 'Beta', color: '#4a8af4', participants: [], active: false, muted: false },
+        { id: 'g3', name: 'Gamma', color: '#d33', participants: [], active: false, muted: false },
+        { id: 'g4', name: 'Delta', color: '#e8a020', participants: [], active: false, muted: false },
+    ]);
+    const [groupMode, setGroupMode] = useState(false);
+    const [globalMuted, setGlobalMuted] = useState(false);
+    const [pttActive, setPttActive] = useState(false);
+    const [pttGroups, setPttGroups] = useState([]);
+    const [volume, setVolume] = useState(75);
+    const [teacherMuted, setTeacherMuted] = useState(false);
+    const teacherMutedRef = useRef(false);
+    const [displayContent, setDisplayContent] = useState('Ready');
+    const [toast, setToast] = useState(null);
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [multimediaOpen, setMultimediaOpen] = useState(false);
+    const [gamesOpen, setGamesOpen] = useState(false);
+    const [sideMenuOpen, setSideMenuOpen] = useState(false);
+    const [selectedParticipants, setSelectedParticipants] = useState([]);
+    const [serverInfo, setServerInfo] = useState(() => {
+        const savedUrl = localStorage.getItem('speechlab-server-url');
+        try {
+            const saved = savedUrl ? new URL(savedUrl) : window.location;
+            return { host: saved.hostname || '127.0.0.1', port: saved.port || '3000', url: saved.origin };
+        } catch {
+            return { host: window.location.hostname || '127.0.0.1', port: window.location.port || '3000', url: window.location.origin };
+        }
+    });
+    const [audioDevices, setAudioDevices] = useState([]);
+    const [inputDeviceId, setInputDeviceId] = useState(() => localStorage.getItem('speechlab-input-device') || '');
+    const [outputDeviceId, setOutputDeviceId] = useState(() => localStorage.getItem('speechlab-output-device') || '');
+    const [teacherMicLevel, setTeacherMicLevel] = useState(null);
+    const [audioError, setAudioError] = useState('');
+    const volumeRef = useRef(volume);
+    const [outputSupported] = useState(() => 'setSinkId' in HTMLMediaElement.prototype);
+    const teacherAudioRef = useRef(null);
+    const outputAudioRef = useRef(null);
+    const teacherReceiveRef = useRef(null);
+    const teacherSendRef = useRef(null);
+
+    const refreshAudioDevices = useCallback(async () => {
+        if (!navigator.mediaDevices?.enumerateDevices) return;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setAudioDevices(devices.filter(device => device.kind === 'audioinput' || device.kind === 'audiooutput'));
+    }, []);
+
+    const publishTeacherAudio = useCallback(async stream => {
+        const sender = teacherSendRef.current;
+        if (!sender) {
+            setAudioError('Teacher audio transport not ready. Please wait and try again.');
+            return false;
+        }
+        try {
+            sender.producer?.close();
+            sender.producer = await sender.transport.produce({ track: stream.getAudioTracks()[0] });
+            setAudioError('');
+            return true;
+        } catch (err) {
+            setAudioError(`Failed to enable microphone: ${err.message}`);
+            return false;
+        }
+    }, []);
+
+    const requestMicrophone = useCallback(async () => {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setAudioError('Microphone access is not supported by this browser.');
+            return;
+        }
+        try {
+            if (teacherAudioRef.current) teacherAudioRef.current.stream.getTracks().forEach(track => track.stop());
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: inputDeviceId ? { deviceId: { exact: inputDeviceId } } : true });
+            const audioContext = new AudioContext();
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            audioContext.createMediaStreamSource(stream).connect(analyser);
+            const data = new Uint8Array(analyser.fftSize);
+            const updateLevel = () => {
+                if (!teacherAudioRef.current || teacherAudioRef.current.stream !== stream) return;
+                analyser.getByteTimeDomainData(data);
+                const average = Math.sqrt(data.reduce((sum, value) => sum + ((value - 128) / 128) ** 2, 0) / data.length);
+                setTeacherMicLevel(teacherAudioRef.current.muted ? 0 : Math.min(100, Math.round(average * 220)));
+                teacherAudioRef.current.animation = requestAnimationFrame(updateLevel);
+            };
+            teacherAudioRef.current = { stream, audioContext, muted: teacherMutedRef.current, animation: requestAnimationFrame(updateLevel) };
+            stream.getAudioTracks()[0].enabled = !teacherMutedRef.current;
+            const published = await publishTeacherAudio(stream);
+            if (!published) {
+                stream.getTracks().forEach(track => track.stop());
+                return;
+            }
+            await refreshAudioDevices();
+        } catch (error) {
+            setAudioError(error.name === 'NotAllowedError' ? 'Microphone permission was denied.' : 'Unable to open the selected microphone.');
+            setTeacherMicLevel(null);
+        }
+    }, [inputDeviceId, publishTeacherAudio, refreshAudioDevices]);
+
+    useEffect(() => {
+        refreshAudioDevices().catch(() => setAudioError('Unable to list audio devices.'));
+        if (navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', refreshAudioDevices);
+        return () => navigator.mediaDevices?.removeEventListener('devicechange', refreshAudioDevices);
+    }, [refreshAudioDevices]);
+
+    useEffect(() => {
+        localStorage.setItem('speechlab-input-device', inputDeviceId);
+        if (teacherAudioRef.current) requestMicrophone();
+    }, [inputDeviceId, requestMicrophone]);
+
+    useEffect(() => {
+        localStorage.setItem('speechlab-output-device', outputDeviceId);
+        if (!outputDeviceId || !outputAudioRef.current?.setSinkId) return;
+        outputAudioRef.current.setSinkId(outputDeviceId).catch(() => setAudioError('Unable to select the speaker output.'));
+    }, [outputDeviceId]);
+
+    useEffect(() => {
+        volumeRef.current = volume;
+        if (outputAudioRef.current) outputAudioRef.current.volume = volume / 100;
+    }, [volume]);
+
+    useEffect(() => () => {
+        if (teacherAudioRef.current) {
+            cancelAnimationFrame(teacherAudioRef.current.animation);
+            teacherAudioRef.current.stream.getTracks().forEach(track => track.stop());
+            teacherAudioRef.current.audioContext.close();
+        }
+    }, []);
+
+    const stopTeacherAudio = useCallback(() => {
+        teacherReceiveRef.current?.consumers.forEach(consumer => consumer.close());
+        teacherReceiveRef.current?.transport.close();
+        teacherSendRef.current?.producer?.close();
+        teacherSendRef.current?.transport.close();
+        teacherReceiveRef.current = null;
+        teacherSendRef.current = null;
+        if (outputAudioRef.current) outputAudioRef.current.srcObject = null;
+    }, []);
+
+    const startTeacherAudio = useCallback(async socket => {
+        if (!window.mediasoupClient || teacherReceiveRef.current) return;
+        try {
+            const response = await new Promise(resolve => socket.emit('teacher_audio_start', {}, resolve));
+            if (response.error) throw new Error(response.error);
+            const device = new window.mediasoupClient.Device();
+            await device.load({ routerRtpCapabilities: response.routerRtpCapabilities });
+            const transport = device.createRecvTransport(response.transportOptions);
+            const sendTransport = device.createSendTransport(response.sendTransportOptions);
+            const stream = new MediaStream();
+            const consumers = new Map();
+            transport.on('connect', ({ dtlsParameters }, callback, errback) => {
+                socket.emit('teacher_audio_connect', { dtlsParameters, direction: 'receive' }, result => result.error ? errback(new Error(result.error)) : callback());
+            });
+            sendTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
+                socket.emit('teacher_audio_connect', { dtlsParameters, direction: 'send' }, result => result.error ? errback(new Error(result.error)) : callback());
+            });
+            sendTransport.on('produce', ({ kind, rtpParameters }, callback, errback) => {
+                socket.emit('teacher_audio_produce', { kind, rtpParameters }, result => result.error ? errback(new Error(result.error)) : callback({ id: result.id }));
+            });
+            const addProducer = async producerId => {
+                if (consumers.has(producerId)) return;
+                const result = await new Promise(resolve => socket.emit('teacher_audio_consume', { producerIds: [producerId], rtpCapabilities: device.recvRtpCapabilities }, resolve));
+                if (result.error || !result.consumers?.length) return;
+                const consumer = await transport.consume(result.consumers[0]);
+                consumers.set(producerId, consumer);
+                stream.addTrack(consumer.track);
+                outputAudioRef.current.srcObject = stream;
+                outputAudioRef.current.volume = volumeRef.current / 100;
+                await outputAudioRef.current.play().catch(() => {});
+            };
+            transport.on('connectionstatechange', state => { if (state === 'failed') setAudioError('Teacher audio connection failed.'); });
+            teacherReceiveRef.current = { transport, consumers, addProducer };
+            teacherSendRef.current = { transport: sendTransport, producer: null };
+            socket.off('teacher_audio_new_producer');
+            socket.on('teacher_audio_new_producer', ({ producerId }) => teacherReceiveRef.current?.addProducer(producerId));
+            if (teacherAudioRef.current) await publishTeacherAudio(teacherAudioRef.current.stream);
+            for (const producer of response.producers) await addProducer(producer.id);
+        } catch (error) {
+            stopTeacherAudio();
+            setAudioError(`Teacher audio unavailable: ${error.message}`);
+        }
+    }, [publishTeacherAudio, stopTeacherAudio]);
+
+    useEffect(() => {
+        if (!window.io || window.location.protocol === 'file:') return undefined;
+        const socket = window.io(window.location.origin, { transports: ['websocket', 'polling'] });
+        socket.on('connect', () => { setServerOnline(true); stopTeacherAudio(); startTeacherAudio(socket); });
+        socket.on('disconnect', () => { setServerOnline(false); stopTeacherAudio(); });
+        socket.on('classroom_state', ({ devices = [] }) => {
+            setParticipants(previous => devices.map(device => ({
+                id: device.device_id,
+                name: device.name || device.device_id,
+                connected: device.online,
+                muted: device.muted || device.remote_muted,
+                raisedHand: device.hand_raised,
+                selected: previous.find(item => item.id === device.device_id)?.selected || false,
+                groupId: previous.find(item => item.id === device.device_id)?.groupId || null,
+                status: device.online ? (device.wifi_rssi !== null && device.wifi_rssi < -70 ? 'warning' : 'active') : 'inactive',
+                answer: device.answer,
+                audioActive: device.audio_active,
+                micLevel: device.mic_level ?? device.audio_level ?? null,
+                lastSeen: device.last_seen,
+            })));
+        });
+        return () => {
+            socket.disconnect();
+            stopTeacherAudio();
+        };
+    }, [startTeacherAudio, stopTeacherAudio]);
+
+    useEffect(() => {
+        if (window.location.protocol === 'file:') return undefined;
+        fetch('/api/server-info').then(response => response.json()).then(setServerInfo).catch(() => {});
+        return undefined;
+    }, []);
+
+    const sendTeacherCommand = (message) => {
+        if (window.io && window.location.protocol !== 'file:') {
+            const socket = window.io(window.location.origin, { transports: ['websocket', 'polling'] });
+            const send = () => {
+                socket.emit('teacher_command', message);
+                setTimeout(() => socket.disconnect(), 150);
+            };
+            if (socket.connected) send();
+            else socket.once('connect', send);
+        }
+    };
+
+    // ---- REDUCER-LIKE DISPATCH ----
+    const dispatch = useCallback((action) => {
+        switch (action.type) {
+            case 'SELECT_PARTICIPANT': {
+                const id = action.payload;
+                setParticipants(prev =>
+                    prev.map(p =>
+                        p.id === id ? { ...p, selected: !p.selected } : p
+                    )
+                );
+                break;
+            }
+            case 'CLEAR_SELECTION': {
+                setParticipants(prev => prev.map(p => ({ ...p, selected: false })));
+                setSelectedParticipants([]);
+                break;
+            }
+            case 'MUTE_PARTICIPANT': {
+                const id = action.payload;
+                const participant = participants.find(p => p.id === id);
+                const muted = !participant?.muted;
+                setParticipants(prev => prev.map(p => p.id === id ? { ...p, muted } : p));
+                sendTeacherCommand({ type: 'remote_mute', device_id: id, enabled: muted });
+                break;
+            }
+            case 'CLEAR_HAND': {
+                const id = action.payload;
+                setParticipants(prev =>
+                    prev.map(p => p.id === id ? { ...p, raisedHand: false } : p)
+                );
+                sendTeacherCommand({ type: 'set_hand', device_id: id, raised: false });
+                break;
+            }
+            case 'LOWER_ALL_HANDS': {
+                setParticipants(prev =>
+                    prev.map(p => ({ ...p, raisedHand: false }))
+                );
+                sendTeacherCommand({ type: 'set_hand', raised: false });
+                showToast('All hands lowered');
+                break;
+            }
+            case 'TOGGLE_GLOBAL_MUTE': {
+                const newVal = !globalMuted;
+                setGlobalMuted(newVal);
+                sendTeacherCommand({ type: 'remote_mute', enabled: newVal });
+                showToast(newVal ? '🔇 Global Mute ON' : '🔊 Global Mute OFF');
+                break;
+            }
+            case 'TOGGLE_GROUP_MODE': {
+                setGroupMode(prev => !prev);
+                if (!groupMode) {
+                    setParticipants(prev => prev.map(p => ({ ...p, selected: false })));
+                    setSelectedParticipants([]);
+                }
+                break;
+            }
+            case 'MAKE_GROUP': {
+                const selected = participants.filter(p => p.selected);
+                if (selected.length < 2) {
+                    showToast('Select at least 2 participants');
+                    return;
+                }
+                // find first available group
+                const available = groups.find(g => g.participants.length === 0);
+                if (!available) {
+                    showToast('All groups are full');
+                    return;
+                }
+                const ids = selected.map(p => p.id);
+                setGroups(prev =>
+                    prev.map(g =>
+                        g.id === available.id ? { ...g, participants: ids, active: true } : g
+                    )
+                );
+                setParticipants(prev =>
+                    prev.map(p =>
+                        ids.includes(p.id) ? { ...p, groupId: available.id, selected: false } : { ...p, selected: false }
+                    )
+                );
+                setSelectedParticipants([]);
+                showToast(`Group "${available.name}" created with ${ids.length} members`);
+                break;
+            }
+            case 'RELEASE_GROUP': {
+                const gid = action.payload;
+                setGroups(prev =>
+                    prev.map(g =>
+                        g.id === gid ? { ...g, participants: [], active: false } : g
+                    )
+                );
+                setParticipants(prev =>
+                    prev.map(p =>
+                        p.groupId === gid ? { ...p, groupId: null } : p
+                    )
+                );
+                showToast(`Group released`);
+                break;
+            }
+            case 'RELEASE_ALL_GROUPS': {
+                setGroups(prev => prev.map(g => ({ ...g, participants: [], active: false })));
+                setParticipants(prev => prev.map(p => ({ ...p, groupId: null })));
+                showToast('All groups released');
+                break;
+            }
+            case 'TOGGLE_GROUP_ACTIVE': {
+                const gid = action.payload;
+                setGroups(prev =>
+                    prev.map(g =>
+                        g.id === gid ? { ...g, active: !g.active } : g
+                    )
+                );
+                break;
+            }
+            case 'SET_PTT_GROUPS': {
+                setPttGroups(action.payload);
+                break;
+            }
+            case 'TOGGLE_PTT': {
+                setPttActive(prev => !prev);
+                if (!pttActive) {
+                    showToast(`🔴 PTT ${pttActive ? 'OFF' : 'ON'}`);
+                }
+                break;
+            }
+            case 'SET_VOLUME': {
+                setVolume(Math.max(0, Math.min(100, action.payload)));
+                break;
+            }
+            case 'SET_INPUT_DEVICE': {
+                setInputDeviceId(action.payload);
+                break;
+            }
+            case 'SET_OUTPUT_DEVICE': {
+                setOutputDeviceId(action.payload);
+                localStorage.setItem('speechlab-output-device', action.payload);
+                break;
+            }
+            case 'SET_DISPLAY': {
+                setDisplayContent(action.payload);
+                showToast(`📺 Display: ${action.payload}`);
+                break;
+            }
+            case 'RENAME_PARTICIPANT': {
+                const { id, name } = action.payload;
+                setParticipants(prev =>
+                    prev.map(p => p.id === id ? { ...p, name } : p)
+                );
+                break;
+            }
+            case 'UPDATE_GROUP_COLOR': {
+                const { id, color } = action.payload;
+                setGroups(prev =>
+                    prev.map(g => g.id === id ? { ...g, color } : g)
+                );
+                break;
+            }
+            case 'RESET': {
+                setParticipants(initialParticipants());
+                setGroups([
+                    { id: 'g1', name: 'Alpha', color: '#2a8a4a', participants: [], active: false, muted: false },
+                    { id: 'g2', name: 'Beta', color: '#4a8af4', participants: [], active: false, muted: false },
+                    { id: 'g3', name: 'Gamma', color: '#dd3333', participants: [], active: false, muted: false },
+                    { id: 'g4', name: 'Delta', color: '#e8a020', participants: [], active: false, muted: false },
+                ]);
+                setGlobalMuted(false);
+                setPttActive(false);
+                setPttGroups([]);
+                setVolume(75);
+                setDisplayContent('Ready');
+                setSelectedParticipants([]);
+                setGroupMode(false);
+                showToast('Dashboard reset');
+                break;
+            }
+            default:
+                break;
+        }
+    }, [participants, groups, globalMuted, pttActive, groupMode]);
+
+    // ---- TOAST ----
+    const showToast = (msg) => {
+        setToast(msg);
+        setTimeout(() => setToast(null), 2600);
+    };
+
+    // ---- HANDLERS ----
+    const handleSelectParticipant = (id) => {
+        if (groupMode) {
+            dispatch({ type: 'SELECT_PARTICIPANT', payload: id });
+            const sel = participants.filter(p => p.selected || p.id === id);
+            setSelectedParticipants(sel.map(p => p.id));
+        } else {
+            // single select for mute etc.
+            dispatch({ type: 'MUTE_PARTICIPANT', payload: id });
+        }
+    };
+
+    const handleMuteParticipant = (id) => {
+        dispatch({ type: 'MUTE_PARTICIPANT', payload: id });
+    };
+
+    const handleClearHand = (id) => {
+        dispatch({ type: 'CLEAR_HAND', payload: id });
+    };
+
+    const handleLowerAllHands = () => {
+        dispatch({ type: 'LOWER_ALL_HANDS' });
+    };
+
+    const handleGlobalMute = () => {
+        if (!globalMuted) {
+            if (confirm('Mute all participants?')) {
+                dispatch({ type: 'TOGGLE_GLOBAL_MUTE' });
+            }
+        } else {
+            dispatch({ type: 'TOGGLE_GLOBAL_MUTE' });
+        }
+    };
+
+    const handleTeacherMute = () => {
+        const muted = !teacherMuted;
+        setTeacherMuted(muted);
+        teacherMutedRef.current = muted;
+        const track = teacherAudioRef.current?.stream.getAudioTracks()[0];
+        if (track) track.enabled = !muted;
+        if (teacherAudioRef.current) teacherAudioRef.current.muted = muted;
+        showToast(muted ? 'Teacher microphone muted' : 'Teacher microphone active');
+    };
+
+    const handleMakeGroup = () => {
+        dispatch({ type: 'MAKE_GROUP' });
+    };
+
+    const handleReleaseGroups = () => {
+        const activeGroups = groups.filter(g => g.participants.length > 0);
+        if (activeGroups.length === 0) {
+            showToast('No active groups to release');
+            return;
+        }
+        if (activeGroups.length === 1) {
+            dispatch({ type: 'RELEASE_GROUP', payload: activeGroups[0].id });
+        } else {
+            dispatch({ type: 'RELEASE_ALL_GROUPS' });
+        }
+    };
+
+    const handleToggleGroupMode = () => {
+        dispatch({ type: 'TOGGLE_GROUP_MODE' });
+        if (!groupMode) {
+            showToast('Group mode: ON — select participants');
+        } else {
+            showToast('Group mode: OFF');
+            dispatch({ type: 'CLEAR_SELECTION' });
+        }
+    };
+
+    const handlePttStart = () => {
+        dispatch({ type: 'TOGGLE_PTT' });
+        showToast(pttGroups.length === 0 ? 'Talking to all connected students' : `Talking to ${pttGroups.map(getGroupName).join(', ')}`);
+    };
+
+    const handlePttStop = () => {
+        if (pttActive) {
+            dispatch({ type: 'TOGGLE_PTT' });
+        }
+    };
+
+    const handleGroupDotClick = (gid) => {
+        const g = groups.find(gr => gr.id === gid);
+        if (!g) return;
+        // toggle active state
+        dispatch({ type: 'TOGGLE_GROUP_ACTIVE', payload: gid });
+        // update ptt groups
+        const updated = groups.map(gr =>
+            gr.id === gid ? { ...gr, active: !gr.active } : gr
+        );
+        const activeIds = updated.filter(gr => gr.active).map(gr => gr.id);
+        setPttGroups(activeIds);
+        if (activeIds.length === 0) {
+            showToast('No group selected');
+        } else {
+            const names = activeIds.map(id => groups.find(g => g.id === id).name).join(', ');
+            showToast(`Addressing: ${names}`);
+        }
+    };
+
+    // ---- COMPUTED ----
+    const getGroupColor = (gid) => {
+        const g = groups.find(gr => gr.id === gid);
+        return g ? g.color : '#4a8af4';
+    };
+
+    const getGroupName = (gid) => {
+        const g = groups.find(gr => gr.id === gid);
+        return g ? g.name : '';
+    };
+
+    const activeGroupCount = groups.filter(g => g.participants.length > 0).length;
+
+    // ---- RENDER ----
+    return (
+        <AppContext.Provider value={{ state: { participants, groups, groupMode, globalMuted, pttActive, pttGroups, volume, displayContent, audioDevices, inputDeviceId, outputDeviceId, outputSupported, audioError, requestMicrophone, serverInfo }, dispatch }}>
+            <div className="dashboard-container">
+                <audio ref={outputAudioRef} aria-hidden="true"></audio>
+
+                {/* TOP BAR */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 800, fontSize: 16, color: '#1a1a2a', letterSpacing: 0.5 }}>GROUPS</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: serverOnline ? '#2a8a4a' : '#8a8a8a' }}>
+                            {serverOnline ? '● SERVER ONLINE' : '○ LOCAL / SERVER OFFLINE'}
+                        </span>
+                        <span className="teacher-level" title={teacherMicLevel === null ? 'Enable the teacher microphone in Settings' : `Teacher microphone level: ${teacherMicLevel}`}>
+                            TEACHER MIC
+                            <VoiceWave level={teacherMicLevel} label={teacherMicLevel === null ? 'Enable the teacher microphone in Settings' : `Teacher microphone level: ${teacherMicLevel}`} />
+                            <button className={`ctrl-btn small ${teacherMuted ? 'active' : ''}`} onClick={handleTeacherMute} title={teacherMuted ? 'Unmute teacher microphone' : 'Mute teacher microphone'}>
+                                {teacherMuted ? '🔇 UNMUTE' : 'MUTE'}
+                            </button>
+                        </span>
+                        <button className="ctrl-btn small" onClick={handleReleaseGroups} disabled={activeGroupCount === 0}>
+                            RELEASE GROUPS
+                        </button>
+                        <button className={`ctrl-btn small ${groupMode ? 'active' : ''}`} onClick={handleMakeGroup} disabled={!groupMode || selectedParticipants.length < 2}>
+                            MAKE A GROUP
+                        </button>
+                        <div className="toggle-wrap">
+                            <span style={{ fontSize: 9 }}>TOGGLE</span>
+                            <div className={`toggle-track ${groupMode ? 'active' : ''}`} onClick={handleToggleGroupMode}>
+                                <div className="toggle-knob"></div>
+                            </div>
+                            <span style={{ fontSize: 9, opacity: 0.6 }}>{groupMode ? 'ON' : 'OFF'}</span>
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button className="ctrl-btn small" onClick={() => setMultimediaOpen(true)}>OPEN MULTIMEDIA</button>
+                        <button className="ctrl-btn small" onClick={() => setGamesOpen(true)}>OPEN GAMES & QUIZ</button>
+                        <button className="hamburger" onClick={() => setSideMenuOpen(true)}>☰</button>
+                    </div>
+                </div>
+
+                {/* PARTICIPANT GRID */}
+                <div className={`participant-grid ${groupMode ? 'group-mode-active' : ''}`} style={{ flex: 1, minHeight: 0 }}>
+                    {participants.map(p => (
+                        <ParticipantButton
+                        key={p.id}
+                        participant={p}
+                        onSelect={handleSelectParticipant}
+                        onMute={handleMuteParticipant}
+                        onClearHand={handleClearHand}
+                        groupColor={p.groupId ? getGroupColor(p.groupId) : null}
+                        groupMode={groupMode}
+                        />
+                    ))}
+                </div>
+
+                {/* BOTTOM PANEL */}
+                <div className="bottom-panel">
+                    {/* NOW SHOWING */}
+                    <div className="display-panel" style={{ flex: 1.2 }}>
+                        <div className="label">NOW SHOWING</div>
+                        <div className="content">{displayContent}</div>
+                        <div className="label" style={{ marginTop: 2 }}>TV DISPLAY</div>
+                    </div>
+
+                    {/* LOWER ALL HANDS */}
+                    <button className="ctrl-btn danger small" onClick={handleLowerAllHands} style={{ flex: 0.6, minWidth: 80 }}>
+                        ✋ LOWER ALL
+                    </button>
+
+                    {/* MUTE */}
+                    <button className={`ctrl-btn large ${globalMuted ? 'active' : ''}`} onClick={handleGlobalMute} style={{ flex: 0.7, minWidth: 80 }}>
+                        {globalMuted ? '🔇 MUTED' : 'MUTE'}
+                    </button>
+
+                    {/* PUSH TO TALK + GROUP INDICATORS */}
+                    <div className="ptt-control" style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1.2, minWidth: 160 }}>
+                        <button
+                        className={`ctrl-btn large success ${pttActive ? 'ptt-active' : ''}`}
+                        onMouseDown={handlePttStart}
+                        onMouseUp={handlePttStop}
+                        onMouseLeave={handlePttStop}
+                        onTouchStart={handlePttStart}
+                        onTouchEnd={handlePttStop}
+                        style={{ flex: 1, minWidth: 80, position: 'relative' }}
+                        >
+                        {pttActive ? '🔴 TALKING' : 'PUSH TO TALK'}
+                        {pttActive && (
+                            <span style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', fontSize: 8, fontWeight: 700, background: '#1a1a2a', color: '#fff', padding: '1px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>
+                            → {pttGroups.length > 0 ? pttGroups.map(id => getGroupName(id)).join(', ') : 'ALL CONNECTED'}
+                        </span>
+                    )}
+                </button>
+                <div className="group-indicators">
+                    <span className="group-label-small">GROUPS</span>
+                    {groups.map((g, idx) => (
+                        <div
+                        key={g.id}
+                        className={`group-dot ${g.active ? 'active' : ''}`}
+                        style={{ background: g.color }}
+                        onClick={() => handleGroupDotClick(g.id)}
+                        title={`${g.name} (${g.participants.length} members) ${g.active ? 'active' : ''}`}
+                        >
+                        {g.participants.length > 0 ? g.participants.length : ''}
+                    </div>
+                ))}
+            </div>
+        </div>
+
+        {/* VOLUME */}
+        <div className="vol-wrap">
+            <span className="vol-icon" aria-hidden="true">🔊</span>
+            <span className="vol-label">VOL</span>
+            <input
+            type="range"
+            min="0"
+            max="100"
+            value={volume}
+            aria-label="Speaker volume"
+            onChange={(e) => dispatch({ type: 'SET_VOLUME', payload: parseInt(e.target.value) })}
+            />
+            <span className="vol-pct">{volume}%</span>
+        </div>
+
+        {/* GEAR */}
+        <button className="gear-btn" onClick={() => setSettingsOpen(true)} style={{ alignSelf: 'center', padding: '0 4px' }}>⚙</button>
+    </div>
+
+    {/* TOAST */}
+    {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+
+    {/* SETTINGS MODAL */}
+    {settingsOpen && (
+        <Modal title="⚙ Settings" onClose={() => setSettingsOpen(false)}>
+            <SettingsPanel onClose={() => setSettingsOpen(false)} />
+        </Modal>
+    )}
+
+    {/* MULTIMEDIA MODAL */}
+    {multimediaOpen && (
+        <Modal title="🎬 Multimedia" onClose={() => setMultimediaOpen(false)}>
+            <MultimediaPanel onClose={() => setMultimediaOpen(false)} />
+        </Modal>
+    )}
+
+    {/* GAMES & QUIZ MODAL */}
+    {gamesOpen && (
+        <Modal title="🎮 Games & Quiz" onClose={() => setGamesOpen(false)}>
+            <GamesQuizPanel onClose={() => setGamesOpen(false)} />
+        </Modal>
+    )}
+
+    {/* SIDE MENU */}
+    <div className={`side-menu ${sideMenuOpen ? 'open' : ''}`}>
+        <button className="close-btn" onClick={() => setSideMenuOpen(false)}>×</button>
+        <h2 style={{ marginTop: 8, marginBottom: 20, fontSize: 20, fontWeight: 700 }}>☰ Menu</h2>
+        {['Dashboard', 'Groups', 'Participants', 'Audio', 'Multimedia', 'Games & Quiz', 'TV Display', 'Settings', 'System Status'].map(item => (
+            <div key={item} className="menu-item" onClick={() => {
+                if (item === 'Settings') { setSideMenuOpen(false);
+                    setSettingsOpen(true); return; }
+                if (item === 'Multimedia') { setSideMenuOpen(false);
+                    setMultimediaOpen(true); return; }
+                if (item === 'Games & Quiz') { setSideMenuOpen(false);
+                    setGamesOpen(true); return; }
+                if (item === 'Dashboard') { setSideMenuOpen(false); return; }
+                showToast(`📌 ${item}`);
+                setSideMenuOpen(false);
+            }}>
+            <span className="icon">
+                {item === 'Dashboard' && '📊'}
+                {item === 'Groups' && '👥'}
+                {item === 'Participants' && '👤'}
+                {item === 'Audio' && '🎵'}
+                {item === 'Multimedia' && '🎬'}
+                {item === 'Games & Quiz' && '🎮'}
+                {item === 'TV Display' && '📺'}
+                {item === 'Settings' && '⚙'}
+                {item === 'System Status' && '🟢'}
+            </span>
+            {item}
+        </div>
+    ))}
+</div>
+</div>
+</AppContext.Provider>
+);
+};
+
+// ----- MOUNT -----
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
