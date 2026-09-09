@@ -49,6 +49,22 @@
             flex-direction: column;
             overflow: hidden;
         }
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            margin-bottom: 8px;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .top-controls,
+        .top-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
         /* Custom scroll */
         ::-webkit-scrollbar {
             width: 4px;
@@ -317,9 +333,16 @@
             display: flex;
             align-items: stretch;
             gap: 12px;
-            margin-top: 8px;
+            order: 1;
+            margin-top: 0;
+            margin-bottom: 8px;
             flex-wrap: wrap;
             flex-shrink: 0;
+            padding: 8px 10px;
+            background: #d0d2d8;
+            border: 1px solid #a5a7ad;
+            border-radius: 14px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
         }
         .ptt-control {
             flex: 1 1 330px !important;
@@ -613,6 +636,7 @@
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 10px;
+            order: 2;
             flex: 1;
             align-content: start;
             padding: 4px 0;
@@ -621,8 +645,64 @@
             overflow-x: hidden;
         }
         @media (max-width: 900px) {
+            body {
+                overflow: auto;
+            }
+            .dashboard-container {
+                width: 100%;
+                min-height: 100svh;
+                height: auto;
+                overflow: visible;
+                padding: 14px 16px 16px;
+            }
+            .top-bar {
+                align-items: flex-start;
+            }
+            .top-controls {
+                flex: 1 1 100%;
+                order: 2;
+            }
+            .top-actions {
+                margin-left: auto;
+            }
             .participant-grid {
                 grid-template-columns: repeat(3, 1fr);
+                flex: none;
+                overflow: visible;
+            }
+            .bottom-panel {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                gap: 10px;
+            }
+            .display-panel {
+                grid-column: 1 / -1;
+            }
+            .ptt-control {
+                flex: none !important;
+                grid-column: 1 / -1;
+                width: 100%;
+                min-width: 0 !important;
+            }
+            .vol-wrap {
+                min-width: 0;
+            }
+        }
+        @media (min-width: 600px) and (max-width: 900px) and (orientation: landscape) {
+            .dashboard-container {
+                min-height: 100svh;
+                height: 100svh;
+                overflow: hidden;
+            }
+            .participant-grid {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                flex: 1 1 auto !important;
+                min-height: 0;
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
+            .bottom-panel {
+                flex-shrink: 0;
             }
         }
         @media (max-width: 640px) {
@@ -630,11 +710,22 @@
                 grid-template-columns: repeat(2, 1fr);
             }
             .dashboard-container {
-                width: 100vw;
-                max-width: none;
-                height: 100vh;
+                width: 100%;
+                min-height: 100svh;
+                height: auto;
                 padding: 12px;
                 border-radius: 0;
+            }
+            .top-controls,
+            .top-actions {
+                width: 100%;
+                margin-left: 0;
+            }
+            .top-actions .ctrl-btn {
+                flex: 1 1 0;
+                min-width: 0;
+                padding-left: 8px;
+                padding-right: 8px;
             }
             .bottom-panel {
                 flex-wrap: wrap;
@@ -642,6 +733,13 @@
             .ptt-control {
                 flex-basis: 100%;
                 min-width: 100% !important;
+            }
+            .display-panel {
+                flex: 1 1 100% !important;
+            }
+            .bottom-panel > .ctrl-btn {
+                flex: 1 1 calc(50% - 5px) !important;
+                min-width: 0 !important;
             }
             .vol-wrap input[type="range"] {
                 min-width: 60px;
@@ -1673,8 +1771,8 @@ const App = () => {
                 <audio ref={outputAudioRef} aria-hidden="true"></audio>
 
                 {/* TOP BAR */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div className="top-bar">
+                    <div className="top-controls">
                         <span style={{ fontWeight: 800, fontSize: 16, color: '#1a1a2a', letterSpacing: 0.5 }}>GROUPS</span>
                         <span style={{ fontSize: 10, fontWeight: 700, color: serverOnline ? '#2a8a4a' : '#8a8a8a' }}>
                             {serverOnline ? '● SERVER ONLINE' : '○ LOCAL / SERVER OFFLINE'}
@@ -1700,7 +1798,7 @@ const App = () => {
                             <span style={{ fontSize: 9, opacity: 0.6 }}>{groupMode ? 'ON' : 'OFF'}</span>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="top-actions">
                         <button className="ctrl-btn small" onClick={() => setMultimediaOpen(true)}>OPEN MULTIMEDIA</button>
                         <button className="ctrl-btn small" onClick={() => setGamesOpen(true)}>OPEN GAMES & QUIZ</button>
                         <button className="hamburger" onClick={() => setSideMenuOpen(true)}>☰</button>
@@ -1722,7 +1820,7 @@ const App = () => {
                     ))}
                 </div>
 
-                {/* BOTTOM PANEL */}
+                {/* CONTROL RIBBON */}
                 <div className="bottom-panel">
                     {/* NOW SHOWING */}
                     <div className="display-panel" style={{ flex: 1.2 }}>
