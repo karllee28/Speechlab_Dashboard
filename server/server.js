@@ -1,12 +1,17 @@
 const path = require('node:path');
 const os = require('node:os');
+const fs = require('node:fs');
 const express = require('express');
-const http = require('node:http');
+const https = require('node:https');
 const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 
 const app = express();
-const server = http.createServer(app);
+const certDirectory = process.env.CERT_DIR || path.join(__dirname, 'certs');
+const server = https.createServer({
+  key: fs.readFileSync(process.env.TLS_KEY || path.join(certDirectory, 'lan-key.pem')),
+  cert: fs.readFileSync(process.env.TLS_CERT || path.join(certDirectory, 'lan-cert.pem'))
+}, app);
 const io = new Server(server, { cors: { origin: '*' } });
 const devices = new Map();
 let mediaWorker;
@@ -29,7 +34,7 @@ const announcedIp = process.env.ANNOUNCED_IP || wifiAddress || Object.values(net
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..')));
 app.get('/api/state', (_req, res) => res.json(snapshot()));
-app.get('/api/server-info', (_req, res) => res.json({ host: announcedIp, port, url: `http://${announcedIp}:${port}` }));
+app.get('/api/server-info', (_req, res) => res.json({ host: announcedIp, port, url: `https://${announcedIp}:${port}` }));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'speechlab.html')));
 
 function deviceFor(id) {
@@ -411,7 +416,10 @@ process.on('uncaughtException', error => {
   console.error('[PROCESS] Uncaught exception:', error);
   process.exitCode = 1;
 });
-server.listen(port, '0.0.0.0', () => console.log(`SpeechLab server listening on http://localhost:${port}`));
+server.listen(port, '0.0.0.0', () => {
+  console.log(`SpeechLab server listening on https://localhost:${port}`);
+  console.log(`SpeechLab LAN URL: https://${announcedIp}:${port}`);
+});
 
 (async () => {
   mediaWorker = await mediasoup.createWorker();

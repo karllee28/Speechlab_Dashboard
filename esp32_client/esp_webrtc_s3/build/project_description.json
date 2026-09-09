@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "esp_webrtc_s3",
-    "project_version":    "1",
+    "project_version":    "08a9f77-dirty",
     "project_path":       "C:/Users/thesi/Desktop/Speechlab_Dashboard/esp32_client/esp_webrtc_s3",
     "idf_path":           "C:/Espressif/frameworks/esp-idf-v5.3.1",
     "build_dir":          "C:/Users/thesi/Desktop/Speechlab_Dashboard/esp32_client/esp_webrtc_s3/build",

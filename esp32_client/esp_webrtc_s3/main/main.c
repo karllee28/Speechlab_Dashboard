@@ -29,7 +29,7 @@
 #define SIGNALING_HOST "192.168.0.18"
 #define SIGNALING_PORT 8081
 #define PEER_NAME "esp32_s3_student"
-#define STUDENT_NAME "Student 1"
+#define STUDENT_NAME "Student 2"
 #define STUDENT_AUDIO_DEST_PORT 5005
 
 #define I2S_MIC_PORT I2S_NUM_0

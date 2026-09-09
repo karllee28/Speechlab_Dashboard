@@ -40,24 +40,24 @@ Channels:     1
 
 WebSocket and Socket.IO carry signaling, registration, status, and classroom commands. Audio does not travel through JSON or WebSocket messages.
 
-## Run the server
+## Run on the local network
 
-Install Node.js dependencies and start the classroom server:
+The project includes `start-local.ps1`, which detects the computer's LAN IPv4 address, uses the existing certificate files in `server/certs`, installs dependencies if needed, and starts both Node processes.
 
-```powershell
-cd C:\Users\thesi\Desktop\Speechlab_Dashboard\server
-npm install
-npm start
-```
-
-In a second terminal, start the ESP32 signaling bridge:
+From PowerShell:
 
 ```powershell
-cd C:\Users\thesi\Desktop\Speechlab_Dashboard\server
-node esp_webrtc_bridge.js
+cd C:\Users\thesi\Desktop\Speechlab_Dashboard
+.\start-local.ps1
 ```
 
-Open the dashboard at `http://localhost:3000`. The dashboard can be opened directly for a local demo, but live devices require the Node server.
+Open the printed URL from another device on the same network, for example:
+
+```powershell
+https://192.168.0.18:3000
+```
+
+The certificate is self-signed, so accept the browser certificate warning once on each device. The ESP32 bridge remains on port `8081`, and ESP32 firmware should continue using the computer's LAN address as `SIGNALING_HOST`.
 
 ## Configure and flash the ESP32
 

@@ -4,9 +4,11 @@ const { WebSocketServer } = require('ws');
 const { io: createDashboardSocket } = require('socket.io-client');
 
 const dashboardPort = Number(process.env.PORT || 3000);
-const dashboardSocket = createDashboardSocket(`http://127.0.0.1:${dashboardPort}`, {
+const dashboardUrl = process.env.DASHBOARD_URL || `https://127.0.0.1:${dashboardPort}`;
+const dashboardSocket = createDashboardSocket(dashboardUrl, {
   reconnection: true,
-  autoConnect: true
+  autoConnect: true,
+  rejectUnauthorized: process.env.TLS_REJECT_UNAUTHORIZED !== '0'
 });
 const peers = new Map();
 

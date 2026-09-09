@@ -1112,6 +1112,7 @@ const App = () => {
     const outputAudioRef = useRef(null);
     const teacherReceiveRef = useRef(null);
     const teacherSendRef = useRef(null);
+    const dashboardSocketRef = useRef(null);
 
     const refreshAudioDevices = useCallback(async () => {
         if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -1126,6 +1127,10 @@ const App = () => {
             return false;
         }
         try {
+            if (sender.producer && sender.producer.track && sender.producer.track.readyState === 'live') {
+                setAudioError('');
+                return true;
+            }
             sender.producer?.close();
             sender.producer = await sender.transport.produce({ track: stream.getAudioTracks()[0] });
             setAudioError('');
@@ -1257,8 +1262,13 @@ const App = () => {
     useEffect(() => {
         if (!window.io || window.location.protocol === 'file:') return undefined;
         const socket = window.io(window.location.origin, { transports: ['websocket', 'polling'] });
+        dashboardSocketRef.current = socket;
         socket.on('connect', () => { setServerOnline(true); stopTeacherAudio(); startTeacherAudio(socket); });
-        socket.on('disconnect', () => { setServerOnline(false); stopTeacherAudio(); });
+        socket.on('disconnect', () => {
+            setServerOnline(false);
+            stopTeacherAudio();
+            if (dashboardSocketRef.current === socket) dashboardSocketRef.current = null;
+        });
         socket.on('classroom_state', ({ devices = [] }) => {
             setParticipants(previous => devices.map(device => ({
                 id: device.device_id,
@@ -1277,6 +1287,7 @@ const App = () => {
         });
         return () => {
             socket.disconnect();
+            if (dashboardSocketRef.current === socket) dashboardSocketRef.current = null;
             stopTeacherAudio();
         };
     }, [startTeacherAudio, stopTeacherAudio]);
@@ -1288,14 +1299,11 @@ const App = () => {
     }, []);
 
     const sendTeacherCommand = (message) => {
-        if (window.io && window.location.protocol !== 'file:') {
-            const socket = window.io(window.location.origin, { transports: ['websocket', 'polling'] });
-            const send = () => {
-                socket.emit('teacher_command', message);
-                setTimeout(() => socket.disconnect(), 150);
-            };
-            if (socket.connected) send();
-            else socket.once('connect', send);
+        const socket = dashboardSocketRef.current;
+        if (socket?.connected) {
+            socket.emit('teacher_command', message);
+        } else {
+            console.warn('[DASHBOARD] Cannot send teacher command; Socket.IO is disconnected', message);
         }
     };
 
