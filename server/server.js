@@ -18,6 +18,7 @@ let mediaWorker;
 let mediaRouter;
 let socketTeacherProducer;
 let teacherProducerSocketId = null;
+let activeTeacherSocketId = null;
 const audioMulticastIp = process.env.AUDIO_MULTICAST_IP || '';
 const audioMulticastPort = Number(process.env.AUDIO_MULTICAST_PORT || 40001);
 let multicastAudioTransport;
@@ -177,8 +178,30 @@ function emitCommand(type, deviceId, payload = {}) {
   publish();
 }
 
+function enforceTeacherRole(socket) {
+  if (activeTeacherSocketId === null) {
+    activeTeacherSocketId = socket.id;
+    console.log(`[TEACHER] ${socket.id} is now the active teacher`);
+    return { isTeacher: true, newTeacher: true };
+  }
+  if (activeTeacherSocketId === socket.id) {
+    return { isTeacher: true, newTeacher: false };
+  }
+  return { isTeacher: false, newTeacher: false };
+}
+
+function clearTeacherRole(socketId) {
+  if (activeTeacherSocketId === socketId) {
+    console.log(`[TEACHER] ${socketId} teacher role removed`);
+    activeTeacherSocketId = null;
+    socketTeacherProducer = null;
+    teacherProducerSocketId = null;
+  }
+}
+
 io.on('connection', socket => {
-  console.log(`[SOCKET] client connected ${socket.id}`);
+  const clientAddr = (socket.handshake.address || '').replace(/^::ffff:/, '');
+  console.log(`[SOCKET] client connected ${socket.id} from ${clientAddr}, handshake.url=${socket.handshake.url}, referer=${socket.handshake.headers.referer}`);
   socket.on('error', error => console.error(`[SOCKET] ${socket.id} error: ${error.message}`));
   socket.emit('classroom_state', snapshot());
   socket.on('register', message => {
@@ -221,12 +244,20 @@ io.on('connection', socket => {
     socket.emit('sync_state', { device_id: id, question, remote_muted: device.remote_muted, hand_raised: device.hand_raised, answer: device.answer });
     sendAudioTransport(socket, device).then(() => {
       if (socketTeacherProducer && device.audioReceivePort && (!sameLiveRegistration || !device.teacherAudioConsumer)) {
+        console.log(`[AUDIO] Connecting teacher audio to ${device.device_id} after device registration`);
         connectTeacherAudio(device).catch(err => console.error(`[AUDIO] connectTeacherAudio failed on register: ${err.message}`));
       }
       if (!sameLiveRegistration) {
+        console.log(`[AUDIO] New device registration detected - notifying teachers about producer ${device.audioProducer.id} for device ${device.device_id}`);
+        let notificationCount = 0;
         for (const teacher of io.sockets.sockets.values()) {
-          if (teacher.data.teacherTransport && teacher.id !== socket.id) teacher.emit('teacher_audio_new_producer', { producerId: device.audioProducer.id, name: device.name });
+          if (teacher.data.teacherTransport && teacher.id !== socket.id) {
+            teacher.emit('teacher_audio_new_producer', { producerId: device.audioProducer.id, name: device.name });
+            notificationCount++;
+            console.log(`[AUDIO] Notified teacher ${teacher.id} about new producer ${device.audioProducer.id}`);
+          }
         }
+        console.log(`[AUDIO] Total teachers notified: ${notificationCount}, total teacher sockets: ${[...io.sockets.sockets.values()].filter(s => s.data.teacherTransport).length}`);
       }
     })
       .catch(error => socket.emit('error', { message: `audio transport unavailable: ${error.message}` }));
@@ -270,7 +301,14 @@ io.on('connection', socket => {
     }
   });
   socket.on('teacher_audio_start', async (_message, callback) => {
+    const teacherRole = enforceTeacherRole(socket);
+    if (!teacherRole.isTeacher) {
+      console.log(`[TEACHER] ${socket.id} rejected: another teacher (${activeTeacherSocketId}) is already active`);
+      return callback({ error: 'TEACHER_SESSION_BUSY', message: 'Another teacher is already active. Only one teacher can control the classroom at a time.' });
+    }
     try {
+      const initialProducers = [...devices.values()].filter(device => device.audioProducer && device.online).map(device => ({ id: device.audioProducer.id, name: device.name }));
+      console.log(`[AUDIO] teacher_audio_start - Initial producers available: ${initialProducers.map(p => `${p.name}=${p.id}`).join(', ') || 'none'}, active devices: ${[...devices.values()].filter(d => d.online).map(d => d.device_id).join(', ') || 'none'}`);
       const transport = socket.data.teacherTransport || await createTeacherTransport(socket);
       const sendTransport = socket.data.teacherSendTransport || await createTeacherSendTransport(socket);
       callback({
@@ -287,7 +325,7 @@ io.on('connection', socket => {
           iceCandidates: sendTransport.iceCandidates,
           dtlsParameters: sendTransport.dtlsParameters
         },
-        producers: [...devices.values()].filter(device => device.audioProducer && device.online).map(device => ({ id: device.audioProducer.id, name: device.name }))
+        producers: initialProducers
       });
     } catch (error) {
       callback({ error: error.message });
@@ -303,8 +341,13 @@ io.on('connection', socket => {
     }
   });
   socket.on('teacher_audio_produce', async ({ kind, rtpParameters }, callback) => {
+    if (activeTeacherSocketId !== socket.id) {
+      console.log(`[TEACHER] ${socket.id} rejected producer: not the active teacher`);
+      return callback({ error: 'NOT_ACTIVE_TEACHER', message: 'You are not the active teacher. Only the first connected teacher can produce audio.' });
+    }
     try {
       if (!socket.data.teacherSendTransport) throw new Error('Teacher send transport is not ready');
+      console.log(`[AUDIO] Teacher producer starting (kind=${kind}), existing consumers: ${[...(socket.data.teacherConsumers || [])].map(c => c.id).join(', ') || 'none'}`);
       socketTeacherProducer?.close();
       socketTeacherProducer = await socket.data.teacherSendTransport.produce({ kind, rtpParameters });
       teacherProducerSocketId = socket.id;
@@ -316,6 +359,7 @@ io.on('connection', socket => {
       const pending = [];
       for (const device of devices.values()) {
         if (!device.online) continue;
+        console.log(`[AUDIO] Connecting teacher audio to device ${device.device_id} (ip=${device.ip}, port=${device.audioReceivePort}, audioProducerId=${device.audioProducer?.id})`);
         try {
           await connectTeacherAudio(device);
           device.audioReceivePort ? connected.push(device.device_id) : pending.push(device.device_id);
@@ -324,6 +368,7 @@ io.on('connection', socket => {
         }
       }
       console.log(`[AUDIO] Teacher audio connected to: ${connected.join(', ') || 'none'}, pending: ${pending.join(', ') || 'none'}`);
+      console.log(`[AUDIO] Active consumers after teacher produce: ${[...(socket.data.teacherConsumers || [])].map(c => c.id).join(', ') || 'none'}`);
       callback({ id: socketTeacherProducer.id });
     } catch (error) {
       console.error(`[AUDIO] Teacher audio produce failed: ${error.message}`);
@@ -333,16 +378,36 @@ io.on('connection', socket => {
   socket.on('teacher_audio_consume', async ({ producerIds, rtpCapabilities }, callback) => {
     try {
       if (!socket.data.teacherTransport) throw new Error('Teacher audio transport is not ready');
+      console.log(`[AUDIO] teacher_audio_consume request: producerIds=${JSON.stringify(producerIds)}, isActive=${activeTeacherSocketId === socket.id}`);
+      console.log(`[AUDIO] Browser rtpCapabilities: ${JSON.stringify(rtpCapabilities)}`);
       const consumers = [];
       for (const producerId of producerIds || []) {
-        if (!mediaRouter.canConsume({ producerId, rtpCapabilities })) continue;
+        const producer = [...devices.values()].find(d => d.audioProducer?.id === producerId);
+        if (!producer) {
+          console.warn(`[AUDIO] Producer ${producerId} not found in devices`);
+          continue;
+        }
+        const canConsume = mediaRouter.canConsume({ producerId, rtpCapabilities });
+        console.log(`[AUDIO] canConsume check - Producer ${producerId} (device=${producer.device_id}, ssrc=${producer.audioSsrc}): canConsume=${canConsume}`);
+        if (!canConsume) {
+          console.warn(`[AUDIO] ⚠️  Cannot consume producer ${producerId} - checking compatibility...`);
+          // Try to get more info about why canConsume failed
+          const producerObj = mediaRouter._producers?.get(producerId);
+          if (producerObj) {
+            console.warn(`[AUDIO]   Producer details: rtpParameters=${JSON.stringify(producerObj.rtpParameters)}`);
+          }
+          continue;
+        }
         const consumer = await socket.data.teacherTransport.consume({ producerId, rtpCapabilities, paused: false });
         attachConsumerDiagnostics(`teacher=${socket.id} producer=${producerId}`, consumer);
         consumers.push({ id: consumer.id, producerId, kind: consumer.kind, rtpParameters: consumer.rtpParameters });
         socket.data.teacherConsumers = [...(socket.data.teacherConsumers || []), consumer];
+        console.log(`[AUDIO] ✅ Consumer created for producer ${producerId}: consumer.id=${consumer.id}`);
       }
+      console.log(`[AUDIO] teacher_audio_consume result: ${consumers.length} consumers created`);
       callback({ consumers });
     } catch (error) {
+      console.error(`[AUDIO] teacher_audio_consume error: ${error.message}`);
       callback({ error: error.message });
     }
   });
@@ -362,6 +427,10 @@ io.on('connection', socket => {
     publish();
   });
   socket.on('teacher_command', message => {
+    if (activeTeacherSocketId !== socket.id) {
+      console.log(`[TEACHER] ${socket.id} rejected command: not the active teacher`);
+      return;
+    }
     if (!message || !message.type) return;
     if (message.type === 'question_start') {
       question = { active: true, id: message.question_id || 'q1', text: message.text || '', options: message.options || {}, correct: null };
@@ -377,6 +446,7 @@ io.on('connection', socket => {
     socket.data.teacherConsumers?.forEach(consumer => consumer.close());
     socket.data.teacherTransport?.close();
     socket.data.teacherSendTransport?.close();
+    clearTeacherRole(socket.id);
     if (socket.id === teacherProducerSocketId) {
       socketTeacherProducer?.close();
       socketTeacherProducer = null;

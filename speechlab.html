@@ -1219,7 +1219,14 @@ const App = () => {
         if (!window.mediasoupClient || teacherReceiveRef.current) return;
         try {
             const response = await new Promise(resolve => socket.emit('teacher_audio_start', {}, resolve));
-            if (response.error) throw new Error(response.error);
+            if (response.error) {
+                const errorCode = response.error;
+                const errorMsg = response.message || response.error;
+                if (errorCode === 'TEACHER_SESSION_BUSY') {
+                    throw new Error(`Teacher session locked: ${errorMsg} Please wait for the current teacher to finish.`);
+                }
+                throw new Error(errorMsg);
+            }
             const device = new window.mediasoupClient.Device();
             await device.load({ routerRtpCapabilities: response.routerRtpCapabilities });
             const transport = device.createRecvTransport(response.transportOptions);
@@ -1233,11 +1240,22 @@ const App = () => {
                 socket.emit('teacher_audio_connect', { dtlsParameters, direction: 'send' }, result => result.error ? errback(new Error(result.error)) : callback());
             });
             sendTransport.on('produce', ({ kind, rtpParameters }, callback, errback) => {
-                socket.emit('teacher_audio_produce', { kind, rtpParameters }, result => result.error ? errback(new Error(result.error)) : callback({ id: result.id }));
+                socket.emit('teacher_audio_produce', { kind, rtpParameters }, result => {
+                    if (result.error) {
+                        const errorCode = result.error;
+                        if (errorCode === 'NOT_ACTIVE_TEACHER') {
+                            errback(new Error(`Audio disabled: ${result.message || 'Only the first connected teacher can produce audio.'}`));
+                        } else {
+                            errback(new Error(result.error));
+                        }
+                    } else {
+                        callback({ id: result.id });
+                    }
+                });
             });
             const addProducer = async producerId => {
                 if (consumers.has(producerId)) return;
-                const result = await new Promise(resolve => socket.emit('teacher_audio_consume', { producerIds: [producerId], rtpCapabilities: device.recvRtpCapabilities }, resolve));
+                const result = await new Promise(resolve => socket.emit('teacher_audio_consume', { producerIds: [producerId], rtpCapabilities: device.rtpCapabilities }, resolve));
                 if (result.error || !result.consumers?.length) return;
                 const consumer = await transport.consume(result.consumers[0]);
                 consumers.set(producerId, consumer);
