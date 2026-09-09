@@ -1122,20 +1122,25 @@ const App = () => {
 
     const publishTeacherAudio = useCallback(async stream => {
         const sender = teacherSendRef.current;
+        console.log(`[Browser] publishTeacherAudio called, sender ready=${!!sender}`);
         if (!sender) {
             setAudioError('Teacher audio transport not ready. Please wait and try again.');
             return false;
         }
         try {
             if (sender.producer && sender.producer.track && sender.producer.track.readyState === 'live') {
+                console.log(`[Browser] publishTeacherAudio: producer already live, skipping`);
                 setAudioError('');
                 return true;
             }
             sender.producer?.close();
+            console.log(`[Browser] publishTeacherAudio: creating new producer from mic track`);
             sender.producer = await sender.transport.produce({ track: stream.getAudioTracks()[0] });
+            console.log(`[Browser] publishTeacherAudio: producer created, id=${sender.producer.id}`);
             setAudioError('');
             return true;
         } catch (err) {
+            console.error(`[Browser] publishTeacherAudio error: ${err.message}`);
             setAudioError(`Failed to enable microphone: ${err.message}`);
             return false;
         }
@@ -1148,7 +1153,14 @@ const App = () => {
         }
         try {
             if (teacherAudioRef.current) teacherAudioRef.current.stream.getTracks().forEach(track => track.stop());
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: inputDeviceId ? { deviceId: { exact: inputDeviceId } } : true });
+            const audioConstraints = inputDeviceId ? { deviceId: { exact: inputDeviceId } } : true;
+            // Add constraints for better audio quality and two-way communication
+            if (typeof audioConstraints === 'object') {
+                audioConstraints.echoCancellation = true;
+                audioConstraints.noiseSuppression = true;
+                audioConstraints.autoGainControl = true;
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
             const audioContext = new AudioContext();
             const analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
@@ -1167,6 +1179,11 @@ const App = () => {
             if (!published) {
                 stream.getTracks().forEach(track => track.stop());
                 return;
+            }
+            // CRITICAL: Ensure audio output is still playing after enabling input
+            if (outputAudioRef.current && outputAudioRef.current.srcObject) {
+                outputAudioRef.current.volume = volumeRef.current / 100;
+                await outputAudioRef.current.play().catch(err => console.error('Audio playback failed:', err.message));
             }
             await refreshAudioDevices();
         } catch (error) {
@@ -1206,6 +1223,7 @@ const App = () => {
     }, []);
 
     const stopTeacherAudio = useCallback(() => {
+        console.log(`[Browser] stopTeacherAudio called`);
         teacherReceiveRef.current?.consumers.forEach(consumer => consumer.close());
         teacherReceiveRef.current?.transport.close();
         teacherSendRef.current?.producer?.close();
@@ -1216,6 +1234,7 @@ const App = () => {
     }, []);
 
     const startTeacherAudio = useCallback(async socket => {
+        console.log(`[Browser] startTeacherAudio called, mediasoupClient=${!!window.mediasoupClient}, alreadyRunning=${!!teacherReceiveRef.current}`);
         if (!window.mediasoupClient || teacherReceiveRef.current) return;
         try {
             const response = await new Promise(resolve => socket.emit('teacher_audio_start', {}, resolve));
@@ -1227,6 +1246,7 @@ const App = () => {
                 }
                 throw new Error(errorMsg);
             }
+            console.log(`[Browser] teacher_audio_start response received, producers=${response.producers?.length || 0}`);
             const device = new window.mediasoupClient.Device();
             await device.load({ routerRtpCapabilities: response.routerRtpCapabilities });
             const transport = device.createRecvTransport(response.transportOptions);
@@ -1255,11 +1275,25 @@ const App = () => {
             });
             const addProducer = async producerId => {
                 if (consumers.has(producerId)) return;
+                console.log(`[Browser] addProducer: requesting consume for ${producerId}`);
                 const result = await new Promise(resolve => socket.emit('teacher_audio_consume', { producerIds: [producerId], rtpCapabilities: device.rtpCapabilities }, resolve));
-                if (result.error || !result.consumers?.length) return;
+                if (result.error || !result.consumers?.length) {
+                    console.warn(`[Browser] addProducer: consume failed - error=${result.error}, consumers=${result.consumers?.length || 0}`);
+                    return;
+                }
                 const consumer = await transport.consume(result.consumers[0]);
+                const track = consumer.track;
+                console.log(`[Browser] addProducer: consumer created, track=${track.id}, readyState=${track.readyState}`);
+                
+                // Log when track ends unexpectedly
+                track.onended = () => {
+                    console.warn(`[Browser] ⚠️ TRACK ENDED for consumer ${consumer.id}: ${producerId}`);
+                };
+                
                 consumers.set(producerId, consumer);
-                stream.addTrack(consumer.track);
+                stream.addTrack(track);
+                console.log(`[Browser] addProducer: track added to stream, stream.getTracks()=${stream.getTracks().length}`);
+                
                 outputAudioRef.current.srcObject = stream;
                 outputAudioRef.current.volume = volumeRef.current / 100;
                 await outputAudioRef.current.play().catch(() => {});
@@ -1268,9 +1302,17 @@ const App = () => {
             teacherReceiveRef.current = { transport, consumers, addProducer };
             teacherSendRef.current = { transport: sendTransport, producer: null };
             socket.off('teacher_audio_new_producer');
-            socket.on('teacher_audio_new_producer', ({ producerId }) => teacherReceiveRef.current?.addProducer(producerId));
-            if (teacherAudioRef.current) await publishTeacherAudio(teacherAudioRef.current.stream);
+            socket.on('teacher_audio_new_producer', ({ producerId }) => {
+                console.log(`[Browser] teacher_audio_new_producer event: ${producerId}`);
+                teacherReceiveRef.current?.addProducer(producerId);
+            });
+            if (teacherAudioRef.current) {
+                console.log(`[Browser] Publishing existing teacher audio stream`);
+                await publishTeacherAudio(teacherAudioRef.current.stream);
+            }
+            console.log(`[Browser] Adding initial producers: ${response.producers.map(p => p.id).join(', ')}`);
             for (const producer of response.producers) await addProducer(producer.id);
+            console.log(`[Browser] startTeacherAudio complete, active consumers: ${consumers.size}`);
         } catch (error) {
             stopTeacherAudio();
             setAudioError(`Teacher audio unavailable: ${error.message}`);
