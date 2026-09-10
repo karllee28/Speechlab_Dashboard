@@ -22,7 +22,7 @@ ESP32 microphone audio is played on the teacher computer, not through the same E
 
 | Port | Protocol | Purpose |
 |---:|---|---|
-| 3000 | TCP | Dashboard HTTP and Socket.IO |
+| 3000 | TCP | Dashboard HTTPS and Socket.IO |
 | 8081 | TCP | ESP32-to-bridge WebSocket signaling |
 | 5004 | UDP | Teacher audio RTP received by the ESP32 speaker |
 | Dynamic | UDP | ESP32 microphone RTP received by mediasoup |
@@ -58,6 +58,37 @@ https://192.168.0.18:3000
 ```
 
 The certificate is self-signed, so accept the browser certificate warning once on each device. The ESP32 bridge remains on port `8081`, and ESP32 firmware should continue using the computer's LAN address as `SIGNALING_HOST`.
+
+### Trust the certificate on Android
+
+The default certificate is suitable for a trusted classroom LAN, but Android Chrome or an Android WebView may show a TLS/SSL warning because it is self-signed. For a more convenient LAN certificate, install `mkcert` on the server computer.
+
+If Chocolatey is unavailable, use Windows Package Manager:
+
+```powershell
+winget install FiloSottile.mkcert
+mkcert -install
+mkcert 192.168.0.18 localhost 127.0.0.1
+```
+
+Copy the generated certificate and key to:
+
+```text
+server/certs/lan-cert.pem
+server/certs/lan-key.pem
+```
+
+Find the local certificate authority file with:
+
+```powershell
+mkcert -CAROOT
+```
+
+Install `rootCA.pem` on the Android tablet as a trusted CA certificate, then restart `start-local.ps1`. A public certificate authority such as Let's Encrypt cannot issue a certificate for a private address like `192.168.0.18`; use a real domain name for a publicly trusted certificate.
+
+### Android web-to-app wrappers
+
+If the dashboard is packaged with a WebView-based tool, configure the app for HTTPS, microphone permission, and private-network access. The tablet and server must remain on the same Wi-Fi network. A self-signed certificate may still need to be installed or explicitly trusted inside the Android app; packaging the page does not automatically make the certificate trusted.
 
 ## Configure and flash the ESP32
 
@@ -95,9 +126,23 @@ The ESP32 starts its speaker receiver on UDP port `5004`, connects to `ws://SIGN
 | MAX98357A BCLK | 15 |
 | MAX98357A LRC | 16 |
 | MAX98357A data | 17 |
-| Status LED | 48 |
+| Status WS2812B data | 48 |
+| Mute WS2812B data | 47 |
+| Mute button | 4 |
 
 Power the INMP441 from 3.3 V and connect its L/R pin to the selected channel. Power the MAX98357A from a suitable 3-5 V supply, connect SD/EN HIGH, and connect the speaker only between its `+` and `-` outputs. Use a common ground and verify GPIOs against the exact ESP32-S3 board before wiring.
+
+The onboard status WS2812B shows connection state: red means no Wi-Fi, orange means Wi-Fi is connected but the signaling server is unavailable, and green means the ESP32 WebSocket is connected to the bridge. The external mute WS2812B is red when the ESP32 microphone is muted and green when it is unmuted. The mute button is active-low and uses the firmware's internal pull-up; pressing it toggles the microphone mute state.
+
+The GPIO values are defined near the top of `main.c` and can be changed if the board wiring differs:
+
+```c
+#define STATUS_LED_GPIO 48
+#define MUTE_LED_GPIO 47
+#define MUTE_BUTTON_GPIO 4
+```
+
+The firmware uses a legacy ESP-IDF I2S API for the current audio implementation. The related deprecation message during compilation is a warning, not a build failure.
 
 ## Configuration
 
@@ -126,6 +171,17 @@ The ESP32 sends an offer like:
 ```
 
 After registration, the bridge forwards an `audio_transport` announcement containing the dynamic RTP destination, payload type, clock rate, and SSRC. Device activity is reported through the bridge, including heartbeats, answers, hand state, mute state, and audio state. The Node server broadcasts `classroom_state` and `server_command` messages to the dashboard and devices.
+
+## Teacher access and audio controls
+
+Only one browser dashboard can be the active teacher at a time. The first browser to initialize teacher audio owns the teacher WebRTC transports and producer. A second browser is redirected to `server-busy.html` and cannot replace or close the active teacher's audio producer. When the active browser disconnects, another browser can connect.
+
+The dashboard Push-to-Talk setting supports:
+
+- **Hold to Talk:** hold the PTT button to transmit; release it to mute.
+- **Toggle:** press once to transmit and press again to mute.
+
+The PTT button uses pointer events and disables long-press browser menus for Android tablet use.
 
 ## Troubleshooting
 
