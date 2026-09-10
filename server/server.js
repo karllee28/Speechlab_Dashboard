@@ -194,8 +194,6 @@ function clearTeacherRole(socketId) {
   if (activeTeacherSocketId === socketId) {
     console.log(`[TEACHER] ${socketId} teacher role removed`);
     activeTeacherSocketId = null;
-    socketTeacherProducer = null;
-    teacherProducerSocketId = null;
   }
 }
 
@@ -304,6 +302,8 @@ io.on('connection', socket => {
     const teacherRole = enforceTeacherRole(socket);
     if (!teacherRole.isTeacher) {
       console.log(`[TEACHER] ${socket.id} rejected: another teacher (${activeTeacherSocketId}) is already active`);
+      socket.emit('dashboard_busy', { noticeUrl: '/server-busy.html' });
+      setTimeout(() => socket.disconnect(true), 100);
       return callback({ error: 'TEACHER_SESSION_BUSY', message: 'Another teacher is already active. Only one teacher can control the classroom at a time.' });
     }
     try {
@@ -446,13 +446,13 @@ io.on('connection', socket => {
     socket.data.teacherConsumers?.forEach(consumer => consumer.close());
     socket.data.teacherTransport?.close();
     socket.data.teacherSendTransport?.close();
-    clearTeacherRole(socket.id);
     if (socket.id === teacherProducerSocketId) {
       socketTeacherProducer?.close();
       socketTeacherProducer = null;
       teacherProducerSocketId = null;
       closeTeacherMulticast();
     }
+    clearTeacherRole(socket.id);
     const deviceIds = socket.data.deviceIds || (socket.data.deviceId ? new Set([socket.data.deviceId]) : []);
     for (const deviceId of deviceIds) {
       if (!devices.has(deviceId)) continue;

@@ -149,6 +149,16 @@ async function startBridgeServer() {
           console.log(`[BRIDGE] Registered ${peerId} name=${payload.studentName || peerId} audioSsrc=${audioSsrc}`);
           console.log(`[BRIDGE] Signaling offer accepted for ${peerId}; audio uses Node PlainTransport/RTP`);
           socket.send(JSON.stringify({ type: 'answer', peerId, sdp: '' }));
+        } else if (payload.type === 'device_event' && peerId) {
+          const eventType = String(payload.event_type || '');
+          if (eventType) {
+            dashboardSocket.emit('device_event', {
+              device_id: peerId,
+              type: eventType,
+              muted: Boolean(payload.muted)
+            });
+          }
+          socket.send(JSON.stringify({ type: 'ack', ok: true }));
         } else {
           socket.send(JSON.stringify({ type: 'ack', ok: true }));
         }

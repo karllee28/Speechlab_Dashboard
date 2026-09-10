@@ -905,25 +905,15 @@
         // ----- SETTINGS PANEL -----
         const SettingsPanel = ({ onClose }) => {
             const { state, dispatch } = useContext(AppContext);
-            const [pNames, setPNames] = useState({});
             const [gColors, setGColors] = useState({});
             const [serverHost, setServerHost] = useState(state.serverInfo.host);
             const [serverPort, setServerPort] = useState(String(state.serverInfo.port || '3000'));
 
             useEffect(() => {
-                const pMap = {};
-                state.participants.forEach(p => { pMap[p.id] = p.name; });
-                setPNames(pMap);
                 const gMap = {};
                 state.groups.forEach(g => { gMap[g.id] = g.color; });
                 setGColors(gMap);
             }, [state.participants, state.groups]);
-
-            const updateName = (id, val) => {
-                const newNames = { ...pNames, [id]: val };
-                setPNames(newNames);
-                dispatch({ type: 'RENAME_PARTICIPANT', payload: { id, name: val } });
-            };
 
             const updateGroupColor = (id, val) => {
                 const newColors = { ...gColors, [id]: val };
@@ -954,18 +944,6 @@
 
             return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div className="settings-row">
-                        <label>Participant Names</label>
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {state.participants.slice(0, 10).map(p => (
-                                <div key={p.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                    <span style={{ fontSize: 11, fontWeight: 600, minWidth: 30 }}>{p.id}</span>
-                                    <input value={pNames[p.id] || ''} onChange={e => updateName(p.id, e.target.value)}
-                                    style={{ flex: 1 }} />
-                                </div>
-                            ))}
-                        </div>
-                    </div>
                     <div className="settings-row">
                         <label>Group Colors</label>
                         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -1001,16 +979,11 @@
                     </div>
                     {state.audioError && <div style={{ color: '#811', fontSize: 11, fontWeight: 600 }}>{state.audioError}</div>}
                     <div className="settings-row">
-                        <label>Microphone Volume</label>
-                        <input type="range" min="0" max="100" defaultValue="80" style={{ flex: 1 }} />
-                    </div>
-                    <div className="settings-row">
-                        <label>Speaker Volume</label>
-                        <input type="range" min="0" max="100" defaultValue="70" style={{ flex: 1 }} />
-                    </div>
-                    <div className="settings-row">
                         <label>Push-to-Talk</label>
-                        <select><option>Hold to Talk</option><option>Toggle</option></select>
+                        <select value={state.pttMode} onChange={e => dispatch({ type: 'SET_PTT_MODE', payload: e.target.value })}>
+                            <option value="hold">Hold to Talk</option>
+                            <option value="toggle">Toggle</option>
+                        </select>
                     </div>
                     <div className="settings-row">
                         <label>Raised Hand</label>
@@ -1027,6 +1000,37 @@
                     </div>
                     <div className="settings-actions">
                         <button className="ctrl-btn danger" onClick={resetDashboard}>Reset Dashboard</button>
+                        <button className="ctrl-btn" onClick={onClose}>Close</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const ParticipantsPanel = ({ onClose }) => {
+            const { state, dispatch } = useContext(AppContext);
+
+            return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ color: '#4a4a5a', fontSize: 12, fontWeight: 600 }}>
+                        Manage classroom participant names.
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {state.participants.map(participant => (
+                            <div key={participant.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ width: 42, flexShrink: 0, fontSize: 11, fontWeight: 700, color: '#4a4a5a' }}>
+                                    {participant.id}
+                                </span>
+                                <input
+                                    value={participant.name || ''}
+                                    aria-label={`Name for ${participant.id}`}
+                                    onChange={event => dispatch({ type: 'RENAME_PARTICIPANT', payload: { id: participant.id, name: event.target.value } })}
+                                    style={{ flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: 10, border: '2px solid #3a3a3a', background: '#f0f1f3', fontSize: 13 }}
+                                />
+                                <span style={{ width: 10, height: 10, flexShrink: 0, borderRadius: '50%', background: participant.connected ? '#2a8a4a' : '#8a8a8a', border: '1px solid #3a3a3a' }} />
+                            </div>
+                        ))}
+                    </div>
+                    <div className="settings-actions">
                         <button className="ctrl-btn" onClick={onClose}>Close</button>
                     </div>
                 </div>
@@ -1179,13 +1183,16 @@ const App = () => {
     const [groupMode, setGroupMode] = useState(false);
     const [globalMuted, setGlobalMuted] = useState(false);
     const [pttActive, setPttActive] = useState(false);
+    const [pttMode, setPttMode] = useState(() => localStorage.getItem('speechlab-ptt-mode') || 'hold');
     const [pttGroups, setPttGroups] = useState([]);
     const [volume, setVolume] = useState(75);
     const [teacherMuted, setTeacherMuted] = useState(false);
     const teacherMutedRef = useRef(false);
+    const pttModeRef = useRef(pttMode);
     const [displayContent, setDisplayContent] = useState('Ready');
     const [toast, setToast] = useState(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [participantsOpen, setParticipantsOpen] = useState(false);
     const [multimediaOpen, setMultimediaOpen] = useState(false);
     const [gamesOpen, setGamesOpen] = useState(false);
     const [sideMenuOpen, setSideMenuOpen] = useState(false);
@@ -1271,8 +1278,8 @@ const App = () => {
                 setTeacherMicLevel(teacherAudioRef.current.muted ? 0 : Math.min(100, Math.round(average * 220)));
                 teacherAudioRef.current.animation = requestAnimationFrame(updateLevel);
             };
-            teacherAudioRef.current = { stream, audioContext, muted: teacherMutedRef.current, animation: requestAnimationFrame(updateLevel) };
-            stream.getAudioTracks()[0].enabled = !teacherMutedRef.current;
+            teacherAudioRef.current = { stream, audioContext, muted: true, animation: requestAnimationFrame(updateLevel) };
+            stream.getAudioTracks()[0].enabled = false;
             const published = await publishTeacherAudio(stream);
             if (!published) {
                 stream.getTracks().forEach(track => track.stop());
@@ -1300,6 +1307,15 @@ const App = () => {
         localStorage.setItem('speechlab-input-device', inputDeviceId);
         if (teacherAudioRef.current) requestMicrophone();
     }, [inputDeviceId, requestMicrophone]);
+
+    useEffect(() => {
+        pttModeRef.current = pttMode;
+        localStorage.setItem('speechlab-ptt-mode', pttMode);
+        setPttActive(false);
+        const track = teacherAudioRef.current?.stream.getAudioTracks()[0];
+        if (track) track.enabled = false;
+        if (teacherAudioRef.current) teacherAudioRef.current.muted = true;
+    }, [pttMode]);
 
     useEffect(() => {
         localStorage.setItem('speechlab-output-device', outputDeviceId);
@@ -1422,6 +1438,9 @@ const App = () => {
         const socket = window.io(window.location.origin, { transports: ['websocket', 'polling'] });
         dashboardSocketRef.current = socket;
         socket.on('connect', () => { setServerOnline(true); stopTeacherAudio(); startTeacherAudio(socket); });
+        socket.on('dashboard_busy', ({ noticeUrl = '/server-busy.html' } = {}) => {
+            window.location.replace(noticeUrl);
+        });
         socket.on('disconnect', () => {
             setServerOnline(false);
             stopTeacherAudio();
@@ -1589,6 +1608,11 @@ const App = () => {
                 }
                 break;
             }
+            case 'SET_PTT_MODE': {
+                setPttMode(action.payload === 'toggle' ? 'toggle' : 'hold');
+                showToast(action.payload === 'toggle' ? 'Push to talk: toggle mode' : 'Push to talk: hold mode');
+                break;
+            }
             case 'SET_VOLUME': {
                 setVolume(Math.max(0, Math.min(100, action.payload)));
                 break;
@@ -1689,7 +1713,7 @@ const App = () => {
         setTeacherMuted(muted);
         teacherMutedRef.current = muted;
         const track = teacherAudioRef.current?.stream.getAudioTracks()[0];
-        if (track) track.enabled = !muted;
+        if (track) track.enabled = !muted && pttActive;
         if (teacherAudioRef.current) teacherAudioRef.current.muted = muted;
         showToast(muted ? 'Teacher microphone muted' : 'Teacher microphone active');
     };
@@ -1721,15 +1745,33 @@ const App = () => {
         }
     };
 
-    const handlePttStart = () => {
-        dispatch({ type: 'TOGGLE_PTT' });
-        showToast(pttGroups.length === 0 ? 'Talking to all connected students' : `Talking to ${pttGroups.map(getGroupName).join(', ')}`);
+    const setTeacherTrackEnabled = (enabled) => {
+        const track = teacherAudioRef.current?.stream.getAudioTracks()[0];
+        if (!track) {
+            showToast('Enable the teacher microphone in Settings first');
+            return false;
+        }
+        const active = enabled && !teacherMutedRef.current;
+        track.enabled = active;
+        if (teacherAudioRef.current) teacherAudioRef.current.muted = !active;
+        return true;
+    };
+
+    const handlePttStart = async () => {
+        if (!teacherAudioRef.current) {
+            await requestMicrophone();
+        }
+        const nextActive = pttMode === 'toggle' ? !pttActive : true;
+        if (!setTeacherTrackEnabled(nextActive)) return;
+        setPttActive(nextActive);
+        showToast(nextActive ? (pttGroups.length === 0 ? 'Talking to all connected students' : `Talking to ${pttGroups.map(getGroupName).join(', ')}`) : 'Teacher microphone released');
     };
 
     const handlePttStop = () => {
-        if (pttActive) {
-            dispatch({ type: 'TOGGLE_PTT' });
-        }
+        if (pttMode !== 'hold' || !pttActive) return;
+        setTeacherTrackEnabled(false);
+        setPttActive(false);
+        showToast('Teacher microphone released');
     };
 
     const handleGroupDotClick = (gid) => {
@@ -1766,7 +1808,7 @@ const App = () => {
 
     // ---- RENDER ----
     return (
-        <AppContext.Provider value={{ state: { participants, groups, groupMode, globalMuted, pttActive, pttGroups, volume, displayContent, audioDevices, inputDeviceId, outputDeviceId, outputSupported, audioError, requestMicrophone, serverInfo }, dispatch }}>
+            <AppContext.Provider value={{ state: { participants, groups, groupMode, globalMuted, pttActive, pttGroups, pttMode, volume, displayContent, audioDevices, inputDeviceId, outputDeviceId, outputSupported, audioError, requestMicrophone, serverInfo }, dispatch }}>
             <div className="dashboard-container">
                 <audio ref={outputAudioRef} aria-hidden="true"></audio>
 
@@ -1843,14 +1885,15 @@ const App = () => {
                     <div className="ptt-control" style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1.2, minWidth: 160 }}>
                         <button
                         className={`ctrl-btn large success ${pttActive ? 'ptt-active' : ''}`}
-                        onMouseDown={handlePttStart}
-                        onMouseUp={handlePttStop}
-                        onMouseLeave={handlePttStop}
-                        onTouchStart={handlePttStart}
-                        onTouchEnd={handlePttStop}
-                        style={{ flex: 1, minWidth: 80, position: 'relative' }}
+                        onPointerDown={handlePttStart}
+                        onPointerUp={handlePttStop}
+                        onPointerCancel={handlePttStop}
+                        onPointerLeave={handlePttStop}
+                        onContextMenu={e => e.preventDefault()}
+                        onSelect={e => e.preventDefault()}
+                        style={{ flex: 1, minWidth: 80, position: 'relative', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
                         >
-                        {pttActive ? '🔴 TALKING' : 'PUSH TO TALK'}
+                        {pttMode === 'hold' ? (pttActive ? '🔴 TALKING' : 'HOLD TO TALK') : (pttActive ? '🔴 TALKING' : 'TOGGLE TALK')}
                         {pttActive && (
                             <span style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', fontSize: 8, fontWeight: 700, background: '#1a1a2a', color: '#fff', padding: '1px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>
                             → {pttGroups.length > 0 ? pttGroups.map(id => getGroupName(id)).join(', ') : 'ALL CONNECTED'}
@@ -1902,6 +1945,12 @@ const App = () => {
         </Modal>
     )}
 
+    {participantsOpen && (
+        <Modal title="👤 Participants" onClose={() => setParticipantsOpen(false)}>
+            <ParticipantsPanel onClose={() => setParticipantsOpen(false)} />
+        </Modal>
+    )}
+
     {/* MULTIMEDIA MODAL */}
     {multimediaOpen && (
         <Modal title="🎬 Multimedia" onClose={() => setMultimediaOpen(false)}>
@@ -1924,6 +1973,8 @@ const App = () => {
             <div key={item} className="menu-item" onClick={() => {
                 if (item === 'Settings') { setSideMenuOpen(false);
                     setSettingsOpen(true); return; }
+                if (item === 'Participants') { setSideMenuOpen(false);
+                    setParticipantsOpen(true); return; }
                 if (item === 'Multimedia') { setSideMenuOpen(false);
                     setMultimediaOpen(true); return; }
                 if (item === 'Games & Quiz') { setSideMenuOpen(false);

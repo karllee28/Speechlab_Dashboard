@@ -28,7 +28,7 @@ NOTICE: [3/3] idf (5.3.1)
 -- Found Threads: TRUE  
 -- Performing Test C_COMPILER_SUPPORTS_WFORMAT_SIGNEDNESS
 -- Performing Test C_COMPILER_SUPPORTS_WFORMAT_SIGNEDNESS - Success
--- App "esp_webrtc_s3" version: 08a9f77-dirty
+-- App "esp_webrtc_s3" version: 29e78b0-dirty
 -- Adding linker script C:/Users/thesi/Desktop/Speechlab_Dashboard/esp32_client/esp_webrtc_s3/build/esp-idf/esp_system/ld/memory.ld
 -- Adding linker script C:/Users/thesi/Desktop/Speechlab_Dashboard/esp32_client/esp_webrtc_s3/build/esp-idf/esp_system/ld/sections.ld.in
 -- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32s3/ld/esp32s3.rom.ld

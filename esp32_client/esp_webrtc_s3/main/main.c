@@ -46,6 +46,8 @@
 #define BUFFER_SAMPLES 256
 #define VOLUME 70
 #define STATUS_LED_GPIO 48
+#define MUTE_LED_GPIO 47
+#define MUTE_BUTTON_GPIO 4
 #define TEACHER_AUDIO_PORT 5004
 #define STUDENT_AUDIO_SSRC_BASE 0x53545544UL
 
@@ -53,11 +55,13 @@ static const char *TAG = "esp_webrtc_s3";
 static esp_websocket_client_handle_t s_ws_client = NULL;
 static EventGroupHandle_t s_wifi_event_group;
 static led_strip_handle_t s_status_led;
+static led_strip_handle_t s_mute_led;
 static int s_teacher_audio_socket = -1;
 static int s_student_audio_socket = -1;
 static struct sockaddr_in s_student_audio_dest = {0};
 static bool s_student_audio_dest_ready = false;
 static bool s_remote_muted = false;
+static char s_peer_id[48] = {0};
 static uint16_t s_student_audio_sequence = 0;
 static uint32_t s_student_audio_timestamp = 0;
 static uint32_t s_student_audio_ssrc = STUDENT_AUDIO_SSRC_BASE;
@@ -66,6 +70,8 @@ static volatile uint32_t s_student_rtp_send_failures = 0;
 static volatile uint32_t s_teacher_rtp_packets = 0;
 static volatile uint32_t s_teacher_rtp_invalid = 0;
 static volatile uint32_t s_wifi_disconnects = 0;
+
+static void set_mute_led(bool muted);
 
 #define RTP_HEADER_MIN_SIZE       12
 #define RTP_MAX_PAYLOAD_BYTES     512
@@ -304,6 +310,17 @@ static void setup_student_mic_sender(void)
     ESP_LOGI(TAG, "Student mic RTP sender socket ready; waiting for audio transport announcement");
 }
 
+static void build_peer_id(void)
+{
+    uint8_t mac[6] = {0};
+    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+        snprintf(s_peer_id, sizeof(s_peer_id), "%s_%02X%02X%02X%02X%02X%02X",
+                 PEER_NAME, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    } else {
+        snprintf(s_peer_id, sizeof(s_peer_id), "%s", PEER_NAME);
+    }
+}
+
 static void apply_student_audio_destination(const char *ip, uint16_t port)
 {
     if (ip == NULL || s_student_audio_socket < 0) {
@@ -323,6 +340,70 @@ static void apply_student_audio_destination(const char *ip, uint16_t port)
 
     s_student_audio_dest_ready = true;
     ESP_LOGI(TAG, "Student mic RTP target updated to %s:%d", ip, port);
+}
+
+static void send_mute_state_event(void)
+{
+    if (s_ws_client == NULL || !esp_websocket_client_is_connected(s_ws_client) || s_peer_id[0] == '\0') {
+        return;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return;
+    }
+    cJSON_AddStringToObject(root, "type", "device_event");
+    cJSON_AddStringToObject(root, "device_id", s_peer_id);
+    cJSON_AddStringToObject(root, "event_type", "mute_state");
+    cJSON_AddBoolToObject(root, "muted", s_remote_muted);
+
+    char *payload = cJSON_PrintUnformatted(root);
+    if (payload != NULL) {
+        esp_websocket_client_send_text(s_ws_client, payload, strlen(payload), pdMS_TO_TICKS(1000));
+        cJSON_free(payload);
+    }
+    cJSON_Delete(root);
+}
+
+static void mute_button_task(void *arg)
+{
+    (void)arg;
+    bool last_raw_state = true;
+    bool stable_state = true;
+    TickType_t changed_at = xTaskGetTickCount();
+
+    while (1) {
+        bool raw_state = gpio_get_level(MUTE_BUTTON_GPIO) != 0;
+        if (raw_state != last_raw_state) {
+            last_raw_state = raw_state;
+            changed_at = xTaskGetTickCount();
+        }
+
+        if (raw_state != stable_state &&
+            (xTaskGetTickCount() - changed_at) >= pdMS_TO_TICKS(40)) {
+            stable_state = raw_state;
+            if (!stable_state) {
+                s_remote_muted = !s_remote_muted;
+                set_mute_led(s_remote_muted);
+                ESP_LOGI(TAG, "[MUTE] Physical button: %s", s_remote_muted ? "muted" : "unmuted");
+                send_mute_state_event();
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+static void setup_mute_button(void)
+{
+    gpio_config_t config = {
+        .pin_bit_mask = 1ULL << MUTE_BUTTON_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&config));
 }
 
 static void student_mic_tx_task(void *arg)
@@ -753,14 +834,24 @@ static void teacher_audio_rx_task(void *arg)
     }
 }
 
-static void set_status_led(uint8_t red, uint8_t green)
+static void set_led_color(led_strip_handle_t led, uint8_t red, uint8_t green, uint8_t blue)
 {
-    if (s_status_led == NULL) {
+    if (led == NULL) {
         return;
     }
 
-    ESP_ERROR_CHECK(led_strip_set_pixel(s_status_led, 0, red, green, 0));
-    ESP_ERROR_CHECK(led_strip_refresh(s_status_led));
+    ESP_ERROR_CHECK(led_strip_set_pixel(led, 0, red, green, blue));
+    ESP_ERROR_CHECK(led_strip_refresh(led));
+}
+
+static void set_status_led(uint8_t red, uint8_t green, uint8_t blue)
+{
+    set_led_color(s_status_led, red, green, blue);
+}
+
+static void set_mute_led(bool muted)
+{
+    set_led_color(s_mute_led, muted ? 0 : 255, muted ? 255 : 0, 0);
 }
 
 static void setup_status_led(void)
@@ -780,7 +871,11 @@ static void setup_status_led(void)
     };
 
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&led_config, &rmt_config, &s_status_led));
-    set_status_led(255, 0);
+
+    led_config.strip_gpio_num = MUTE_LED_GPIO;
+    ESP_ERROR_CHECK(led_strip_new_rmt_device(&led_config, &rmt_config, &s_mute_led));
+    set_status_led(255, 0, 0);
+    set_mute_led(false);
 }
 
 __attribute__((unused)) static uint8_t linear_to_mu_law(int16_t sample)
@@ -873,7 +968,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
         xEventGroupClearBits(s_wifi_event_group, BIT0);
-        set_status_led(255, 0);
+        set_status_led(255, 0, 0);
         s_wifi_disconnects++;
         ESP_LOGW(TAG, "[WIFI] Disconnected reason=%d; reconnecting",
                  event ? event->reason : -1);
@@ -882,7 +977,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "[WIFI] Connected IP=" IPSTR, IP2STR(&event->ip_info.ip));
         xEventGroupSetBits(s_wifi_event_group, BIT0);
-        set_status_led(0, 255);
+        set_status_led(255, 80, 0);
     }
 }
 
@@ -946,20 +1041,13 @@ static void send_offer_to_bridge(void)
         return;
     }
 
-    uint8_t mac[6] = {0};
-    char peer_id[48] = {0};
-    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
-        snprintf(peer_id, sizeof(peer_id), "%s_%02X%02X%02X%02X%02X%02X",
-                 PEER_NAME, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    } else {
-        snprintf(peer_id, sizeof(peer_id), "%s", PEER_NAME);
-    }
+    build_peer_id();
 
     cJSON *root = cJSON_CreateObject();
     esp_netif_ip_info_t ip_info;
     char device_ip[16] = {0};
     cJSON_AddStringToObject(root, "type", "offer");
-    cJSON_AddStringToObject(root, "peerId", peer_id);
+    cJSON_AddStringToObject(root, "peerId", s_peer_id);
     cJSON_AddStringToObject(root, "studentName", STUDENT_NAME);
     cJSON_AddNumberToObject(root, "audioSsrc", (double)s_student_audio_ssrc);
     cJSON_AddNumberToObject(root, "audioReceivePort", TEACHER_AUDIO_PORT);
@@ -997,6 +1085,7 @@ static void process_answer_json(const char *payload)
         cJSON *enabled = cJSON_GetObjectItemCaseSensitive(root, "enabled");
         if (enabled != NULL && cJSON_IsBool(enabled)) {
             s_remote_muted = cJSON_IsTrue(enabled);
+            set_mute_led(s_remote_muted);
             ESP_LOGI(TAG, "Student microphone %s", s_remote_muted ? "muted" : "unmuted");
         }
     } else if (type != NULL && strcmp(type->valuestring, "audio_transport") == 0) {
@@ -1021,6 +1110,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "[WS] Connected to %s:%d", SIGNALING_HOST, SIGNALING_PORT);
+            set_status_led(0, 255, 0);
             reset_teacher_audio_stream();
             s_student_audio_dest_ready = false;
             send_offer_to_bridge();
@@ -1046,6 +1136,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
 
         case WEBSOCKET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "[WS] Disconnected; retrying later");
+            set_status_led(255, 80, 0);
             reset_teacher_audio_stream();
             s_student_audio_dest_ready = false;
             break;
@@ -1151,6 +1242,8 @@ void app_main(void)
     setup_status_led();
     wifi_init();
     initialize_device_identity();
+    build_peer_id();
+    setup_mute_button();
     setup_microphone();
     setup_speaker();
 
@@ -1160,6 +1253,7 @@ void app_main(void)
     xTaskCreate(teacher_audio_rx_task, "teacher_rx_task", 8192, NULL, 6, NULL);
     xTaskCreate(teacher_audio_playback_task, "teacher_play_task", 8192, NULL, 5, NULL);
     xTaskCreate(student_mic_tx_task, "student_mic_tx_task", 8192, NULL, 5, NULL);
+    xTaskCreate(mute_button_task, "mute_button_task", 3072, NULL, 4, NULL);
     xTaskCreate(health_monitor_task, "health_monitor_task", 4096, NULL, 2, NULL);
 
     ESP_LOGI(TAG, "ESP-IDF bidirectional audio path initialized (teacher receive + student mic transmit)");
